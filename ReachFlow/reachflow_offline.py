@@ -17,7 +17,8 @@ import numpy as np
 import time
 import timeit
 import datetime
-import matplotlib.pyplot as plt
+from pyqtgraph.pyqtgraph.Qt import QtGui, QtCore
+import pyqtgraph.pyqtgraph as pg
 from uncertainty_estimation_gp import *
 L = 0.257
 L_f = 0.137
@@ -42,7 +43,7 @@ except OSError:
 	print("Couldn't change the working directory to reach_flow/src. This code will not work with roslaunch or rosrun file")
 
 class Nodo(object):
-    def __init__(self):
+    def __init__(self, graph_widget):
         global mode
         self.pos_x = 0
         self.pos_y = 0
@@ -63,6 +64,11 @@ class Nodo(object):
         self.length_vel = self.gp_data['length_vel']
         self.Y_train_angle = self.gp_data['Y_train_angle']
         self.length_angle = self.gp_data['length_angle'] 
+
+        self.ifplot = True
+        self.box_markers = []
+        self.state_marker = None
+        if self.ifplot: self.init_plot(graph_widget)
         
         if mode == 'rounded_square':
             self.waypoint_x = 1
@@ -96,8 +102,38 @@ class Nodo(object):
         self.waypoint_curvature = waypoint_t.z
         self.waypoint_x = waypoint_t.x
         self.waypoint_y = waypoint_t.y
-    def start(self,fig):
-        ifplot = True
+    def init_plot(self, graph_widget):
+        self.p = graph_widget.addPlot(row=0, col=0)
+
+        if mode == "circle":
+            th = np.arange(0*np.pi, 2*np.pi+np.pi/10, np.pi/10)
+            self.p.plot(x=1 * np.cos(th), y=1 * np.sin(th)+1)
+            self.p.setXRange(-2, 2, padding=0)
+            self.p.setYRange(1, 3, padding=0)
+        if mode == "rounded_square":
+            self.p.plot(x=np.arange(0, 1.1, 0.1), y=0*np.arange(0, 1.1, 0.1))#1st
+
+            th = np.arange(1.5*np.pi, 2*np.pi+np.pi/10, np.pi/10)
+            self.p.plot(x=1 * np.cos(th)+1, y=1 * np.sin(th)+1)#2nd
+
+            self.p.plot(x=2+0*np.arange(1, 2.1, 0.1), y=np.arange(1, 2.1, 0.1))#3rd
+
+            th = np.arange(0*np.pi, 0.5*np.pi+np.pi/10, np.pi/10)
+            self.p.plot(x=1 * np.cos(th)+1, y=1 * np.sin(th)+2)#4th
+
+            self.p.plot(x=np.arange(0, 1.1, 0.1), y=3+0*np.arange(0, 1.1, 0.1))#5th               
+
+            th = np.arange(0.5*np.pi, 1.0*np.pi+np.pi/10, np.pi/10)
+            self.p.plot(x=1 * np.cos(th)+0, y=1 * np.sin(th)+2)#6th
+
+            self.p.plot(x=-1+0*np.arange(0, 1.1, 0.1), y=np.arange(1, 2.1, 0.1))#7th
+
+            th = np.arange(np.pi, 1.5*np.pi+np.pi/10, np.pi/10)
+            self.p.plot(x=1 * np.cos(th)+0, y=1 * np.sin(th)+1)#8th
+            self.p.setXRange(-2, 5, padding=0)
+            self.p.setYRange(-2, 5, padding=0)
+            
+    def start(self):
         total_t = 0
         counter = 0
         horizon = 5
@@ -134,39 +170,18 @@ class Nodo(object):
 
         bag_start = time.time()
 
-        if mode == "circle":
-            th = np.arange(0*np.pi, 2*np.pi+np.pi/10, np.pi/10)
-            plt.plot(1 * np.cos(th), 1 * np.sin(th)+1, 'b', linewidth = 3.0)
-            plt.xlim(-2, 2)
-            plt.ylim(-1, 3)
-        if mode == "rounded_square":
-            start = time.time()
-            plt.plot(np.arange(0, 1.1, 0.1), 0*np.arange(0, 1.1, 0.1), 'b', linewidth = 3.0 )#1st
-
-            th = np.arange(1.5*np.pi, 2*np.pi+np.pi/10, np.pi/10)
-            plt.plot(1 * np.cos(th)+1, 1 * np.sin(th)+1, 'b', linewidth = 3.0)#2nd
-
-            plt.plot(2+0*np.arange(1, 2.1, 0.1), np.arange(1, 2.1, 0.1), 'b', linewidth = 3.0)#3rd
-
-            th = np.arange(0*np.pi, 0.5*np.pi+np.pi/10, np.pi/10)
-            plt.plot(1 * np.cos(th)+1, 1 * np.sin(th)+2, 'b', linewidth = 3.0)#4th
-
-            plt.plot(np.arange(0, 1.1, 0.1), 3+0*np.arange(0, 1.1, 0.1), 'b', linewidth = 3.0)#5th               
-
-            th = np.arange(0.5*np.pi, 1.0*np.pi+np.pi/10, np.pi/10)
-            plt.plot(1 * np.cos(th)+0, 1 * np.sin(th)+2, 'b', linewidth = 3.0)#6th
-
-            plt.plot(-1+0*np.arange(0, 1.1, 0.1), np.arange(1, 2.1, 0.1), 'b', linewidth = 3.0)#7th
-
-            th = np.arange(np.pi, 1.5*np.pi+np.pi/10, np.pi/10)
-            plt.plot(1 * np.cos(th)+0, 1 * np.sin(th)+1, 'b', linewidth = 3.0)#8th
-            plt.xlim(-2, 5)
-            plt.ylim(-2, 5)
-
         # plt.show()
 
         while (time.time() - bag_start) < 20:
             counter = counter+1
+
+            if self.ifplot == True:
+                if self.state_marker is not None:
+                    self.p.removeItem(self.state_marker)
+                for marker in self.box_markers:
+                    self.p.removeItem(marker)
+                self.box_markers = []
+
             self.state = [self.pos_x, self.pos_y, self.yaw, self.x_dot, self.y_dot, self.yaw_dot]
             self.command = [self.command_speed, self.command_angle]
 	    #####################simulation of malicious command#################
@@ -221,12 +236,11 @@ class Nodo(object):
                 x_list.append(x_temp.split(','))
                 y_list.append(y_temp.split(','))
             
-            box_markers = []
             for i in range(len(x_list)):
-                x_list_i.append([float(item) for item in x_list[i]])
-                y_list_i.append([float(jtem) for jtem in y_list[i]])
-                marker, = plt.plot(x_list_i[i], y_list_i[i], 'g')
-                box_markers.append(marker)
+                x0, x1 = float(x_list[0][0]), float(x_list[0][1])
+                y0, y1 = float(y_list[0][0]), float(y_list[0][1])
+                box_line = self.p.plot(x=[x0, x1], y=[y0, y1])
+                self.box_markers.append(box_line)
 
             x_list_buffer.append(x_list_i)
             y_list_buffer.append(y_list_i)
@@ -258,17 +272,12 @@ class Nodo(object):
             total_parse_flowstar += parsing_flowstar_time
             # print("parse flowstar: %.3f" % parsing_flowstar_time)
 
-            start = time.time()
-            state_marker, = plt.plot(self.state[0], self.state[1], 'r*', markersize=12)
-            if ifplot ==True:
-                fig.canvas.draw()
-                state_marker.remove()
-                for marker in box_markers:
-                    marker.remove()
-            
-            end = time.time()
-            plot_time = end - start
-            total_plot_time += plot_time
+            # start = time.time()
+            self.state_marker = pg.ScatterPlotItem(x=[self.state[0]], y=[self.state[1]], size=12)
+            self.p.addItem(self.state_marker)
+            # end = time.time()
+            # plot_time = end - start
+            # total_plot_time += plot_time
             # print("Plot time: %.3f" % plot_time)
 
             # delta_t = (end-start).total_seconds()*1000
@@ -486,9 +495,17 @@ def initial_alpha_r_interval(v_y_I, yaw_dot_I, v_x_I):
     fun = lambda v_y,yaw_dot,v_x: imath.atan((v_y-L_f*yaw_dot)/v_x)
     alpha_r = fun(v_y_I, yaw_dot_I, v_x_I)
     return [alpha_r[0][0], alpha_r[0][1]]
-if __name__ == '__main__':
+
+
+if __name__=='__main__':
+    app = QtGui.QApplication([])
+    w = QtGui.QMainWindow()
+    cw = pg.GraphicsLayoutWidget()
+    w.show()
+    w.resize(600,800)
+    w.setCentralWidget(cw)
+    w.setWindowTitle('Car trajectory with bounding boxes')
+
     rospy.init_node('reach_flow')
-    my_node = Nodo()
-    plt.ion()
-    fig = plt.figure(num=None, figsize=(15,15))
-    my_node.start(fig)
+    my_node = Nodo(cw)
+    my_node.start()
