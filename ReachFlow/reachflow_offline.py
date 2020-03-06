@@ -25,7 +25,13 @@ L_r = 0.12
 C_alpha = 56.4
 I_z = 0.0558
 mode = 'rounded_square'#'circle', 'straight',rounded_square
+
+# Change below according to your config
 reach_flow_dir = '/home/alvin/Projects/assured_autonomy_car/ReachFlow'
+
+# save safety invalidations
+SAVE_FILES = False
+
 
 # need to change the os path to reach_flow/src for the file to be called through roslaunch
 #-amankh
@@ -120,7 +126,15 @@ class Nodo(object):
         counter_flow_x, counter_flow_y = [], []
         x_all, y_all, ind_all, flow_x_all, flow_y_all = [], [], [], [], []
         delta_t_all = []
-        while not rospy.is_shutdown():
+
+        total_setup = 0
+        total_flowstar = 0
+        total_parse_flowstar = 0
+        total_plot_time = 0
+
+        bag_start = time.time()
+        while (time.time() - bag_start) < 148:
+            counter = counter+1
             self.state = [self.pos_x, self.pos_y, self.yaw, self.x_dot, self.y_dot, self.yaw_dot]
             self.command = [self.command_speed, self.command_angle]
 	    #####################simulation of malicious command#################
@@ -130,7 +144,7 @@ class Nodo(object):
             #    #break
             #    #self.command = [2, 0]
             
-            #start = datetime.datetime.now()
+            start = time.time()
             if uncertainty_estimation_method == 'sampling':
                 speed_bound = V_SAMPLING_BOUND #time invariant uncertainty of speed change in future 1s
                 delta_bound = DELTA_SAMPLING_BOUND #time invariant uncertainty of angle change in future 1s
@@ -151,10 +165,19 @@ class Nodo(object):
                 if delta_bound < DELTA_SAMPLING_BOUND:
                     counter_contract_delta+=1 
                     contract_ratio_delta += np.abs(delta_bound-DELTA_SAMPLING_BOUND)
+            end = time.time()
+            setup_time = end - start
+            total_setup += setup_time
+            # print("Setup: %.3f" % setup_time)
  
-            start = datetime.datetime.now()
+            start = time.time()
             flow = executeFlowstar(model, horizon, self.state, self.command, self.waypoint_x, self.waypoint_y, speed_bound, delta_bound)
-            end = datetime.datetime.now()
+            end = time.time()
+            flowstar_time = end - start
+            total_flowstar += flowstar_time
+            # print("flowstar: %.3f" % flowstar_time)
+
+            start = time.time() 
             flow_x = flow[0]
             flow_y = flow[1]
             x_list = []
@@ -170,8 +193,10 @@ class Nodo(object):
                 x_list_i.append([float(item) for item in x_list[i]])
                 y_list_i.append([float(jtem) for jtem in y_list[i]])
                 plt.plot(x_list_i[i], y_list_i[i], 'g')
+
             x_list_buffer.append(x_list_i)
             y_list_buffer.append(y_list_i)
+
             if counter >= horizon:
                 del x_list_buffer[0]
                 del y_list_buffer[0] 
@@ -191,7 +216,15 @@ class Nodo(object):
                     counter_eg_y.append(self.pos_y)
                     counter_flow_x.append(x_list_buffer[0])
                     counter_flow_y.append(y_list_buffer[0])
-                    # np.savez('counter_eg' +str(len(counter_eg_x)) + '.npz', counter_eg_x = counter_eg_x, counter_eg_y=counter_eg_y,counter_flow_x=counter_flow_x, counter_flow_y=counter_flow_y)
+                    if SAVE_FILES:
+                        np.savez('counter_eg' +str(len(counter_eg_x)) + '.npz', counter_eg_x = counter_eg_x, counter_eg_y=counter_eg_y,counter_flow_x=counter_flow_x, counter_flow_y=counter_flow_y)
+            
+            end = time.time()
+            parsing_flowstar_time = end - start
+            total_parse_flowstar += parsing_flowstar_time
+            # print("parse flowstar: %.3f" % parsing_flowstar_time)
+
+            start = time.time()
             if mode == "circle":
                 plt.plot(self.state[0], self.state[1], 'r*', markersize=12)
                 th = np.arange(0*np.pi, 2*np.pi+np.pi/10, np.pi/10)
@@ -226,27 +259,38 @@ class Nodo(object):
                 fig.canvas.draw()
                 plt.clf()
             
-            delta_t = (end-start).total_seconds()*1000
-            delta_t_all.append(delta_t)
-            total_t = total_t+delta_t  
-            counter = counter+1
-            if delta_t > 100:
-                counter_timeout += 1
+            end = time.time()
+            plot_time = end - start
+            total_plot_time += plot_time
+            # print("Plot time: %.3f" % plot_time)
+
+            # delta_t = (end-start).total_seconds()*1000
+            # delta_t_all.append(delta_t)
+            # total_t = total_t+delta_t  
+            # if delta_t > 100:
+            #     counter_timeout += 1
                 #print counter, 'time out!!!!'  
                 #print 'timeout percentage %: ', 100*counter_timeout/counter    
-            if counter > 0:
-                ave_t = total_t/counter
-            if delta_t >= max_t:
-                max_t = delta_t
-            if delta_t <= min_t:
-                min_t = delta_t
-            if counter%1000 == 0:
-                print('runtime', np.max(delta_t_all), np.min(delta_t_all), np.mean(delta_t_all), np.std(delta_t_all))
-                print('inclusion', counter_inside, counter)
-                print('contraction', contract_ratio_speed/counter_contract_speed, contract_ratio_delta/counter_contract_delta)
-                #np.savez('all_data.npz', x_all=x_all, y_all=y_all, ind_all=ind_all, flow_x_all=flow_x_all, flow_y_all = flow_y_all)               
-                break
+            # if counter > 0:
+            #     ave_t = total_t/counter
+            # if delta_t >= max_t:
+            #     max_t = delta_t
+            # if delta_t <= min_t:
+            #     min_t = delta_t
+            # if counter%1000 == 0:
+            #     print('runtime', np.max(delta_t_all), np.min(delta_t_all), np.mean(delta_t_all), np.std(delta_t_all))
+            #     print('inclusion', counter_inside, counter)
+            #     print('contraction', contract_ratio_speed/counter_contract_speed, contract_ratio_delta/counter_contract_delta)
+            #     #np.savez('all_data.npz', x_all=x_all, y_all=y_all, ind_all=ind_all, flow_x_all=flow_x_all, flow_y_all = flow_y_all)               
+            #     break
             self.loop_rate.sleep()
+        
+        print("Total setup: %.3f" % (total_setup / counter))
+        print("Total flowstar: %.3f" % (total_flowstar / counter))
+        print("Total parse flowstar: %.3f" % (total_parse_flowstar / counter))
+        print("Total plot time: %.3f" % (total_plot_time / counter))
+        print("Average runtime: %.3f" % ((time.time() - bag_start) / counter))
+
 
 
 def check_inside_flow(xflow, yflow, state):
