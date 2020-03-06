@@ -133,7 +133,39 @@ class Nodo(object):
         total_plot_time = 0
 
         bag_start = time.time()
-        while (time.time() - bag_start) < 148:
+
+        if mode == "circle":
+            th = np.arange(0*np.pi, 2*np.pi+np.pi/10, np.pi/10)
+            plt.plot(1 * np.cos(th), 1 * np.sin(th)+1, 'b', linewidth = 3.0)
+            plt.xlim(-2, 2)
+            plt.ylim(-1, 3)
+        if mode == "rounded_square":
+            start = time.time()
+            plt.plot(np.arange(0, 1.1, 0.1), 0*np.arange(0, 1.1, 0.1), 'b', linewidth = 3.0 )#1st
+
+            th = np.arange(1.5*np.pi, 2*np.pi+np.pi/10, np.pi/10)
+            plt.plot(1 * np.cos(th)+1, 1 * np.sin(th)+1, 'b', linewidth = 3.0)#2nd
+
+            plt.plot(2+0*np.arange(1, 2.1, 0.1), np.arange(1, 2.1, 0.1), 'b', linewidth = 3.0)#3rd
+
+            th = np.arange(0*np.pi, 0.5*np.pi+np.pi/10, np.pi/10)
+            plt.plot(1 * np.cos(th)+1, 1 * np.sin(th)+2, 'b', linewidth = 3.0)#4th
+
+            plt.plot(np.arange(0, 1.1, 0.1), 3+0*np.arange(0, 1.1, 0.1), 'b', linewidth = 3.0)#5th               
+
+            th = np.arange(0.5*np.pi, 1.0*np.pi+np.pi/10, np.pi/10)
+            plt.plot(1 * np.cos(th)+0, 1 * np.sin(th)+2, 'b', linewidth = 3.0)#6th
+
+            plt.plot(-1+0*np.arange(0, 1.1, 0.1), np.arange(1, 2.1, 0.1), 'b', linewidth = 3.0)#7th
+
+            th = np.arange(np.pi, 1.5*np.pi+np.pi/10, np.pi/10)
+            plt.plot(1 * np.cos(th)+0, 1 * np.sin(th)+1, 'b', linewidth = 3.0)#8th
+            plt.xlim(-2, 5)
+            plt.ylim(-2, 5)
+
+        # plt.show()
+
+        while (time.time() - bag_start) < 20:
             counter = counter+1
             self.state = [self.pos_x, self.pos_y, self.yaw, self.x_dot, self.y_dot, self.yaw_dot]
             self.command = [self.command_speed, self.command_angle]
@@ -189,10 +221,12 @@ class Nodo(object):
                 x_list.append(x_temp.split(','))
                 y_list.append(y_temp.split(','))
             
+            box_markers = []
             for i in range(len(x_list)):
                 x_list_i.append([float(item) for item in x_list[i]])
                 y_list_i.append([float(jtem) for jtem in y_list[i]])
-                plt.plot(x_list_i[i], y_list_i[i], 'g')
+                marker, = plt.plot(x_list_i[i], y_list_i[i], 'g')
+                box_markers.append(marker)
 
             x_list_buffer.append(x_list_i)
             y_list_buffer.append(y_list_i)
@@ -225,39 +259,12 @@ class Nodo(object):
             # print("parse flowstar: %.3f" % parsing_flowstar_time)
 
             start = time.time()
-            if mode == "circle":
-                plt.plot(self.state[0], self.state[1], 'r*', markersize=12)
-                th = np.arange(0*np.pi, 2*np.pi+np.pi/10, np.pi/10)
-                plt.plot(1 * np.cos(th), 1 * np.sin(th)+1, 'b', linewidth = 3.0)
-                plt.xlim(-2, 2)
-                plt.ylim(-1, 3)
-            if mode == "rounded_square":
-                plt.plot(self.state[0], self.state[1], 'r*', markersize=12)#current position
-
-                plt.plot(np.arange(0, 1.1, 0.1), 0*np.arange(0, 1.1, 0.1), 'b', linewidth = 3.0 )#1st
-
-                th = np.arange(1.5*np.pi, 2*np.pi+np.pi/10, np.pi/10)
-                plt.plot(1 * np.cos(th)+1, 1 * np.sin(th)+1, 'b', linewidth = 3.0)#2nd
-
-                plt.plot(2+0*np.arange(1, 2.1, 0.1), np.arange(1, 2.1, 0.1), 'b', linewidth = 3.0)#3rd
-
-                th = np.arange(0*np.pi, 0.5*np.pi+np.pi/10, np.pi/10)
-                plt.plot(1 * np.cos(th)+1, 1 * np.sin(th)+2, 'b', linewidth = 3.0)#4th
-
-                plt.plot(np.arange(0, 1.1, 0.1), 3+0*np.arange(0, 1.1, 0.1), 'b', linewidth = 3.0)#5th               
-
-                th = np.arange(0.5*np.pi, 1.0*np.pi+np.pi/10, np.pi/10)
-                plt.plot(1 * np.cos(th)+0, 1 * np.sin(th)+2, 'b', linewidth = 3.0)#6th
-
-                plt.plot(-1+0*np.arange(0, 1.1, 0.1), np.arange(1, 2.1, 0.1), 'b', linewidth = 3.0)#7th
-
-                th = np.arange(np.pi, 1.5*np.pi+np.pi/10, np.pi/10)
-                plt.plot(1 * np.cos(th)+0, 1 * np.sin(th)+1, 'b', linewidth = 3.0)#8th
-                plt.xlim(-2, 5)
-                plt.ylim(-2, 5)
+            state_marker, = plt.plot(self.state[0], self.state[1], 'r*', markersize=12)
             if ifplot ==True:
                 fig.canvas.draw()
-                plt.clf()
+                state_marker.remove()
+                for marker in box_markers:
+                    marker.remove()
             
             end = time.time()
             plot_time = end - start
@@ -269,8 +276,8 @@ class Nodo(object):
             # total_t = total_t+delta_t  
             # if delta_t > 100:
             #     counter_timeout += 1
-                #print counter, 'time out!!!!'  
-                #print 'timeout percentage %: ', 100*counter_timeout/counter    
+            #     print counter, 'time out!!!!'  
+            #     print 'timeout percentage %: ', 100*counter_timeout/counter    
             # if counter > 0:
             #     ave_t = total_t/counter
             # if delta_t >= max_t:
