@@ -1,0 +1,3 @@
+[submodule "aa_car_platform"]
+	path = aa_car_platform
+	url = git@github.com:Alvinosaur/aa_car_platform.git
