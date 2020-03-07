@@ -2,6 +2,9 @@
 
 using namespace flowstar;
 using namespace std;
+#include <iostream>
+#include <string>
+#include <sstream>
 
 
 int main(int argc, char *argv[])
@@ -15,20 +18,19 @@ int main(int argc, char *argv[])
 	int v_id = stateVars.declareVar("v");
 	int t_id = stateVars.declareVar("t");
 
-        double x_0_min = atof(argv[1]);
-        double x_0_max = atof(argv[2]);
-        double y_0_min = atof(argv[3]);
-        double y_0_max = atof(argv[4]);
-        double psi_0_min = atof(argv[5]);
-        double psi_0_max = atof(argv[6]);
-        double beta_0_min = atof(argv[7]);
-        double beta_0_max = atof(argv[8]);
-        double v_0_min = atof(argv[9]);
-        double v_0_max = atof(argv[10]);
-        string formula = argv[11];
+	double x_0_min = atof(argv[1]);
+	double x_0_max = atof(argv[2]);
+	double y_0_min = atof(argv[3]);
+	double y_0_max = atof(argv[4]);
+	double psi_0_min = atof(argv[5]);
+	double psi_0_max = atof(argv[6]);
+	double beta_0_min = atof(argv[7]);
+	double beta_0_max = atof(argv[8]);
+	double v_0_min = atof(argv[9]);
+	double v_0_max = atof(argv[10]);
+	
+	string formula = argv[11];
         
-
-
 
 	// define the dynamics
 	Expression_AST<Real> ode_expression_x("v * cos(psi+beta)");
@@ -134,19 +136,43 @@ int main(int argc, char *argv[])
                 
 
 	Plot_Setting plot_setting;
-	plot_setting.printOff();
-	plot_setting.setOutputDims(x_id, y_id);
-        //int indicator = 1;
-	//int indicator = plot_setting.plot_2D_interval_MATLAB("RC_bicycle", result);//Qin
-        plot_setting.plot_2D_interval_MATLAB("RC_bicycle", result);
-        //printf("indicator", (double)(indicator));
-        //if(indicator == 0)
-        //{
-        //    cout<<x_0_min<<endl;
-        //    cout<<y_0_min<<endl; 
-        //}
-        //cout<<indicator<<endl;
-//	plot_setting.plot_2D_grids_GNUPLOT("test", 10, result);
+
+	std::list<TaylorModelVec<Real> >::const_iterator tmvIter = result.tmv_flowpipes.begin();
+	std::list<Flowpipe>::const_iterator fpIter = result.nonlinear_flowpipes.begin();
+	std::list<int>::const_iterator safetyIter = result.safety_of_flowpipes.begin();
+
+	unsigned int total_size = result.safety_of_flowpipes.size();
+
+	std::vector<unsigned int> varIDs({0, 1});
+	
+	for(; safetyIter != result.safety_of_flowpipes.end() ; ++tmvIter, ++fpIter, ++safetyIter)
+	{
+		std::vector<Interval> box;
+		tmvIter->intEval(box, fpIter->domain, varIDs);
+
+		Interval X = box[0], Y = box[1];
+		std::cout << X.inf() << "," << X.sup() << "," << X.sup() << ",";
+		std::cout << X.inf() << "," << X.inf() << "," << Y.inf() << ",";
+		std::cout << Y.inf() << "," << Y.sup() << "," << Y.sup() << "," << Y.inf() << ";";
+
+		switch(*safetyIter)
+		{
+		case SAFE:
+			std::cout << "0,0.4,0" << std::endl;
+			break;
+		case UNSAFE:
+			std::cout << "1,0,0," << std::endl;
+			break;
+		case UNKNOWN:
+			std::cout << "0,0,1" << std::endl;
+			break;
+		}
+
+		if(*safetyIter == UNSAFE)
+		{
+			break;
+		}
+	}
 
 	return 0;
 }

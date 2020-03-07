@@ -216,7 +216,11 @@ class Nodo(object):
             # print("Setup: %.3f" % setup_time)
  
             start = time.time()
-            flow = executeFlowstar(model, horizon, self.state, self.command, self.waypoint_x, self.waypoint_y, speed_bound, delta_bound)
+            try:
+                flow = executeFlowstar(model, horizon, self.state, self.command, self.waypoint_x, self.waypoint_y, speed_bound, delta_bound)
+            except Exception as e:
+                print("Error in executeFlowstar: %s" % e)
+                continue
             end = time.time()
             flowstar_time = end - start
             total_flowstar += flowstar_time
@@ -408,16 +412,24 @@ def executeFlowstar(model, horizon, state, command, waypoint_x, waypoint_y, spee
         constant = -1-epsilon_cir        
         #formula = str(constant)+"+x*x+y*y"
         formula = "20-x"
+
+    exec_file = os.path.join(model, './RC_bicycle')
     ####################for model without beta#########################
     if model == 'nonlinear_without_beta':
         beta = initial_beta_interval(delta_I)
-        co = './RC_bicycle '+str(pos_x[0]) + ' '+ str(pos_x[1]) +' ' + str(pos_y[0]) + ' '+ str(pos_y[1]) + ' ' + str(yaw[0]) +' '+ str(yaw[1]) + ' ' +str(command_speed[0]) + ' '+str(command_speed[1]) + ' '+ str(delta_I[0][0]) + ' '+ str(delta_I[0][1]) + ' '+str(-1*speed_bound)+' '+str(speed_bound) + ' '+str(-1*delta_bound) +' '+str(delta_bound) +' '+formula
-        os.system('cd ' + model +';'+co)
+        args = [exec_file, str(pos_x[0]), str(pos_x[1]), str(pos_y[0]), str(pos_y[1]), 
+            str(yaw[0]), str(yaw[1]), str(command_speed[0]), str(command_speed[1]),
+            str(delta_I[0][0]), str(delta_I[0][1]), str(-1*speed_bound), str(speed_bound),
+            str(-1*delta_bound), str(delta_bound), formula]
+
     ####################for model with beta############################
+    
     elif model == 'nonlinear_with_beta':
         beta = initial_beta_interval(delta_I)
-        co = './RC_bicycle '+str(pos_x[0]) + ' '+ str(pos_x[1]) +' ' + str(pos_y[0]) + ' '+ str(pos_y[1]) + ' ' + str(yaw[0]) +' '+ str(yaw[1]) + ' ' + str(beta[0]) + ' ' +str(beta[1])+ ' '+str(command_speed[0]) + ' '+str(command_speed[1]) + ' '+ formula
-        os.system('cd ' + model +';'+co)
+        args = [exec_file, str(pos_x[0]), str(pos_x[1]), str(pos_y[0]), str(pos_y[1]), 
+            str(yaw[0]), str(yaw[1]), str(beta[0]), str(beta[1]), str(command_speed[0]), str(command_speed[1]),
+            formula]
+
     elif model == 'linear':
         a13 = -1*command[0]*np.sin(state[2])
         a23 = command[0]*np.cos(state[2])
@@ -425,8 +437,11 @@ def executeFlowstar(model, horizon, state, command, waypoint_x, waypoint_y, spee
         b21 = np.sin(state[2])
         b31 = np.tan(command[1])/0.12
         b32 = command[0]/(0.12*np.cos(command[1])*np.cos(command[1])) 
-        co = './RC_bicycle '+ str(a13) +' '+str(a23) + ' ' + str(b11) + ' '+str(b21)+' '+str(b31)+' '+ str(b32) + ' '+str(pos_x[0]) + ' '+ str(pos_x[1]) +' ' + str(pos_y[0]) + ' '+ str(pos_y[1]) + ' ' + str(yaw[0]) +' '+ str(yaw[1]) + ' ' +str(command_speed[0]) + ' '+str(command_speed[1]) + ' '+ str(delta_I[0][0]) + ' '+ str(delta_I[0][1]) + ' '+str(-1*speed_bound)+' '+str(speed_bound) + ' '+str(-1*delta_bound) +' '+str(delta_bound)
-        os.system('cd ' + model +';'+co)
+        args = [exec_file, str(a13), str(a23), str(b11), str(b21), str(b31), str(b32), 
+            str(pos_x[0]), str(pos_x[1]), str(pos_y[0]), str(pos_y[1]), str(yaw[0]), str(yaw[1]),
+            str(command_speed[0]), str(command_speed[1]), str(delta_I[0][0]), str(delta_I[0][1]),
+            str(-1*speed_bound), str(speed_bound), str(-1*delta_bound), str(delta_bound)]
+
     else:
         beta = initial_beta_interval(delta_I)
         alpha_f = initial_alpha_f_interval(y_dot_I, yaw_dot_I, x_dot_I, delta_I)
@@ -435,39 +450,41 @@ def executeFlowstar(model, horizon, state, command, waypoint_x, waypoint_y, spee
         Fxr = [0, 0]
         Fyf = [min(-1*C_alpha*interval(alpha_f)[0][0], -1*C_alpha*interval(alpha_f)[0][1]), max(-1*C_alpha*interval(alpha_f)[0][0], -1*C_alpha*interval(alpha_f)[0][1])]
         Fyr = [min(-1*C_alpha*interval(alpha_r)[0][0], -1*C_alpha*interval(alpha_r)[0][1]), max(-1*C_alpha*interval(alpha_r)[0][0], -1*C_alpha*interval(alpha_r)[0][1])]
-        co = './RC_bicycle '+str(pos_x[0]) + ' '+ str(pos_x[1]) +' ' + str(pos_y[0]) + ' '+ str(pos_y[1]) + ' ' + str(yaw[0]) +' '+ str(yaw[1]) + ' ' +str(yaw_dot[0]) + ' '+ str(yaw_dot[1])+ ' ' + str(Fxf[0]) + ' '+str(Fxf[1]) + ' ' +str(Fxr[0]) + ' '+str(Fxr[1])+' '+str(Fyf[0]) + ' '+str(Fyf[1]) + ' '+str(Fyr[0]) + ' '+ str(Fyr[1]) + ' '+ str(beta[0]) + ' ' +str(beta[1])+ ' '+str(command_speed[0])+' '+str(command_speed[1])+' '+formula
-        os.system('cd ' + model +';'+co)
-
+        args = [exec_file, str(pos_x[0]), str(pos_x[1]), str(pos_y[0]), str(pos_y[1]),
+            str(yaw[0]), str(yaw[1]), str(yaw_dot[0]), str(yaw_dot[1]), str(Fxf[0]), str(Fxf[1]),
+            str(Fxr[0]), str(Fxr[1]), str(Fyf[0]), str(Fyf[1]), str(Fyr[0]), str(Fyr[1]), 
+            str(beta[0]), str(beta[1]), str(command_speed[0]), str(command_speed[1]), formula]
+        
+    print("Calling CPP:")
+    process = subprocess.Popen(args, stdout=subprocess.PIPE)
+    # output = ...0.918423,1.20878,1.20878,0.918423,0.918423,2.88629,2.88629,3.17285,3.17285,2.88629;0,0.4,0...
+    (output, err) = process.communicate()
     flow_x = list()
     flow_y = list()
     color_list = list()
-    with open(model+'/outputs/RC_bicycle.m', 'r') as f:
-        for line in f:
-            c1 = '['
-            c2 = ']'
-            if 'plot' in line:
-                left = [pos for pos, char in enumerate(line) if char == c1]
-                right = [pos for pos, char in enumerate(line) if char == c2]
-                string_x = line[left[0]+1:right[0]]
-                string_y = line[left[1]+1:right[1]]
-                string_color = line[left[2]+1:right[2]]
-                x_list = [float(item) for item in string_x.split(',')]#x coordinates every line, for one flowsegment 
-                y_list = [float(item) for item in string_y.split(',')]#y coordinates every line, for one flowsegment
-                color_line = [float(item) for item in string_color.split(' ')]
-                if color_line[0] > 0:
-                    color_list.append('red')
-                elif color_line[2] > 0:
-                    color_list.append('blue')
-                else:
-                    color_list.append('green')
-                flow_x.append(string_x)
-                flow_y.append(string_y)
-        if 'red' in color_list or 'blue' in color_list:
-            indicator = 0#'unsafe'
+    output = output.decode(encoding='utf8')
+    lines = output.split("\n")[:-1]
+    for line in lines:
+        points_str, color_str = line.split(";")
+        points = points_str.split(",")
+        colors = color_str.split(",")
+        string_x = ",".join(points[0:5])
+        string_y = ",".join(points[5:])
+
+        if float(colors[0]) > 0:
+            color_list.append('red')
+        elif float(colors[2]) > 0:
+            color_list.append('blue')
         else:
-            indicator = 1#'safe'
-        flow_x_itr = ';'.join(flow_x)#x multiple flowsegments
-        flow_y_itr = ';'.join(flow_y)#y multiple flowsegments
+            color_list.append('green')
+        flow_x.append(string_x)
+        flow_y.append(string_y)
+    if 'red' in color_list or 'blue' in color_list:
+        indicator = 0#'unsafe'
+    else:
+        indicator = 1#'safe'
+    flow_x_itr = ';'.join(flow_x)#x multiple flowsegments
+    flow_y_itr = ';'.join(flow_y)#y multiple flowsegments
     return [flow_x_itr, flow_y_itr, indicator]
 def positive(x):
     return max(x, 0)
