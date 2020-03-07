@@ -43,7 +43,7 @@ except OSError:
 	print("Couldn't change the working directory to reach_flow/src. This code will not work with roslaunch or rosrun file")
 
 class Nodo(object):
-    def __init__(self, graph_widget):
+    def __init__(self, graph_widget, ifplot=True):
         global mode
         self.pos_x = 0
         self.pos_y = 0
@@ -65,7 +65,7 @@ class Nodo(object):
         self.Y_train_angle = self.gp_data['Y_train_angle']
         self.length_angle = self.gp_data['length_angle'] 
 
-        self.ifplot = True
+        self.ifplot = ifplot
         self.box_markers = []
         self.state_marker = None
         if self.ifplot: self.init_plot(graph_widget)
@@ -81,11 +81,10 @@ class Nodo(object):
         rospy.Subscriber("ekf_localization/odom", nav_msgs.msg.Odometry, self.stateCallback)
         rospy.Subscriber("commands/keyboard", ackermann_msgs.msg.AckermannDriveStamped, self.actionCallback)
         rospy.Subscriber("aa_planner/waypoints", geometry_msgs.msg.Point, self.waypointCallback)
+        self.start()
         #rospy.Subscriber("aa_planner/commands", ackermann_msgs.msg.AckermannDriveStamped, self.actionCallback)
 	#self.flow_pub = rospy.Publisher("reach_flow/flow", reach_flow.msg.FlowstarVisual, queue_size=1)
         #self.action_pub = rospy.Publisher("commands/keyboard", ackermann_msgs.msg.AckermannDriveStamped, queue_size=1)
-
-        self.loop_rate.sleep()
 
     def stateCallback(self,state_t):
         self.pos_x = state_t.pose.pose.position.x#same to odom.pose.pose.position.x?
@@ -134,6 +133,7 @@ class Nodo(object):
             self.p.setYRange(-2, 5, padding=0)
             
     def start(self):
+        print('start')
         total_t = 0
         counter = 0
         horizon = 5
@@ -170,9 +170,7 @@ class Nodo(object):
 
         bag_start = time.time()
 
-        # plt.show()
-
-        while (time.time() - bag_start) < 20:
+        while (time.time() - bag_start) < 5:
             counter = counter+1
 
             if self.ifplot == True:
@@ -224,27 +222,38 @@ class Nodo(object):
             total_flowstar += flowstar_time
             # print("flowstar: %.3f" % flowstar_time)
 
-            start = time.time() 
+             
             flow_x = flow[0]
             flow_y = flow[1]
             x_list = []
             y_list = []
             x_list_i, y_list_i = [], []
+            
+            start = time.time()
             for i in range(len(flow_x.split(';'))):
                 x_temp = flow_x.split(';')[i]
                 y_temp = flow_y.split(';')[i]
                 x_list.append(x_temp.split(','))
                 y_list.append(y_temp.split(','))
+            end = time.time()
+            print(end - start)
             
+            start = time.time()
             for i in range(len(x_list)):
-                x0, x1 = float(x_list[0][0]), float(x_list[0][1])
-                y0, y1 = float(y_list[0][0]), float(y_list[0][1])
-                box_line = self.p.plot(x=[x0, x1], y=[y0, y1])
-                self.box_markers.append(box_line)
+                x0, x1, x2, x3, x4 = x_list[i]
+                y0, y1, y2, y3, y4 = y_list[i]
+                box_line1 = self.p.plot(x=[float(x0), float(x1)], y=[float(y0), float(y1)], clear=True)
+                box_line2 = self.p.plot(x=[float(x1), float(x2)], y=[float(y1), float(y2)], clear=True)
+                box_line3 = self.p.plot(x=[float(x2), float(x3)], y=[float(y2), float(y3)], clear=True)
+                box_line4 = self.p.plot(x=[float(x3), float(x4)], y=[float(y3), float(y4)], clear=True)
+                # self.box_markers += [box_line1, box_line2, box_line3, box_line4]
 
             x_list_buffer.append(x_list_i)
             y_list_buffer.append(y_list_i)
+            end = time.time()
+            print(end - start)
 
+            start = time.time()
             if counter >= horizon:
                 del x_list_buffer[0]
                 del y_list_buffer[0] 
@@ -269,12 +278,14 @@ class Nodo(object):
             
             end = time.time()
             parsing_flowstar_time = end - start
+            print(end - start)
             total_parse_flowstar += parsing_flowstar_time
             # print("parse flowstar: %.3f" % parsing_flowstar_time)
 
             # start = time.time()
             self.state_marker = pg.ScatterPlotItem(x=[self.state[0]], y=[self.state[1]], size=12)
             self.p.addItem(self.state_marker)
+            pg.QtGui.QApplication.processEvents()
             # end = time.time()
             # plot_time = end - start
             # total_plot_time += plot_time
@@ -304,7 +315,7 @@ class Nodo(object):
         print("Total setup: %.3f" % (total_setup / counter))
         print("Total flowstar: %.3f" % (total_flowstar / counter))
         print("Total parse flowstar: %.3f" % (total_parse_flowstar / counter))
-        print("Total plot time: %.3f" % (total_plot_time / counter))
+        # print("Total plot time: %.3f" % (total_plot_time / counter))
         print("Average runtime: %.3f" % ((time.time() - bag_start) / counter))
 
 
@@ -502,10 +513,9 @@ if __name__=='__main__':
     w = QtGui.QMainWindow()
     cw = pg.GraphicsLayoutWidget()
     w.show()
-    w.resize(600,800)
+    w.resize(600,600)
     w.setCentralWidget(cw)
     w.setWindowTitle('Car trajectory with bounding boxes')
 
     rospy.init_node('reach_flow')
     my_node = Nodo(cw)
-    my_node.start()
