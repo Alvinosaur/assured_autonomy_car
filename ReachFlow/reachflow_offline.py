@@ -133,7 +133,6 @@ class Nodo(object):
             self.p.setYRange(-2, 5, padding=0)
             
     def start(self):
-        print('start')
         total_t = 0
         counter = 0
         horizon = 5
@@ -170,15 +169,19 @@ class Nodo(object):
 
         bag_start = time.time()
 
-        while (time.time() - bag_start) < 5:
+        # while (bag_start - time.time()) < 20:  # short test
+        while not rospy.is_shutdown():
             counter = counter+1
 
+            start = time.time()
             if self.ifplot == True:
                 if self.state_marker is not None:
                     self.p.removeItem(self.state_marker)
                 for marker in self.box_markers:
                     self.p.removeItem(marker)
                 self.box_markers = []
+            end = time.time()
+            total_plot_time += (end - start)
 
             self.state = [self.pos_x, self.pos_y, self.yaw, self.x_dot, self.y_dot, self.yaw_dot]
             self.command = [self.command_speed, self.command_angle]
@@ -213,7 +216,6 @@ class Nodo(object):
             end = time.time()
             setup_time = end - start
             total_setup += setup_time
-            # print("Setup: %.3f" % setup_time)
  
             start = time.time()
             try:
@@ -224,40 +226,35 @@ class Nodo(object):
             end = time.time()
             flowstar_time = end - start
             total_flowstar += flowstar_time
-            # print("flowstar: %.3f" % flowstar_time)
-
              
+            start = time.time()
             flow_x = flow[0]
             flow_y = flow[1]
             x_list = []
             y_list = []
             x_list_i, y_list_i = [], []
             
-            start = time.time()
             for i in range(len(flow_x.split(';'))):
                 x_temp = flow_x.split(';')[i]
                 y_temp = flow_y.split(';')[i]
                 x_list.append(x_temp.split(','))
                 y_list.append(y_temp.split(','))
-            end = time.time()
-            print(end - start)
             
-            start = time.time()
             for i in range(len(x_list)):
+                if len(x_list[i]) != 5 and len(y_list[i]) != 5: continue
                 x0, x1, x2, x3, x4 = x_list[i]
                 y0, y1, y2, y3, y4 = y_list[i]
-                box_line1 = self.p.plot(x=[float(x0), float(x1)], y=[float(y0), float(y1)], clear=True)
-                box_line2 = self.p.plot(x=[float(x1), float(x2)], y=[float(y1), float(y2)], clear=True)
-                box_line3 = self.p.plot(x=[float(x2), float(x3)], y=[float(y2), float(y3)], clear=True)
-                box_line4 = self.p.plot(x=[float(x3), float(x4)], y=[float(y3), float(y4)], clear=True)
-                # self.box_markers += [box_line1, box_line2, box_line3, box_line4]
-
-            x_list_buffer.append(x_list_i)
-            y_list_buffer.append(y_list_i)
+                box_line1 = self.p.plot(x=[float(x0), float(x1)], y=[float(y0), float(y1)])
+                box_line2 = self.p.plot(x=[float(x1), float(x2)], y=[float(y1), float(y2)])
+                box_line3 = self.p.plot(x=[float(x2), float(x3)], y=[float(y2), float(y3)])
+                box_line4 = self.p.plot(x=[float(x3), float(x4)], y=[float(y3), float(y4)])
+                self.box_markers += [box_line1, box_line2, box_line3, box_line4]
             end = time.time()
-            print(end - start)
+            total_plot_time += (end - start)
 
             start = time.time()
+            x_list_buffer.append(x_list_i)
+            y_list_buffer.append(y_list_i)
             if counter >= horizon:
                 del x_list_buffer[0]
                 del y_list_buffer[0] 
@@ -272,7 +269,6 @@ class Nodo(object):
                 else:
                     bad_position_x.append(self.pos_x)
                     bad_position_y.append(self.pos_y)
-                    #print counter, self.pos_x, self.pos_y, 'not included'
                     counter_eg_x.append(self.pos_x)
                     counter_eg_y.append(self.pos_y)
                     counter_flow_x.append(x_list_buffer[0])
@@ -282,18 +278,15 @@ class Nodo(object):
             
             end = time.time()
             parsing_flowstar_time = end - start
-            print(end - start)
             total_parse_flowstar += parsing_flowstar_time
-            # print("parse flowstar: %.3f" % parsing_flowstar_time)
 
             # start = time.time()
+            start = time.time()
             self.state_marker = pg.ScatterPlotItem(x=[self.state[0]], y=[self.state[1]], size=12)
             self.p.addItem(self.state_marker)
             pg.QtGui.QApplication.processEvents()
-            # end = time.time()
-            # plot_time = end - start
-            # total_plot_time += plot_time
-            # print("Plot time: %.3f" % plot_time)
+            end = time.time()
+            total_plot_time += (end - start)
 
             # delta_t = (end-start).total_seconds()*1000
             # delta_t_all.append(delta_t)
@@ -319,7 +312,7 @@ class Nodo(object):
         print("Total setup: %.3f" % (total_setup / counter))
         print("Total flowstar: %.3f" % (total_flowstar / counter))
         print("Total parse flowstar: %.3f" % (total_parse_flowstar / counter))
-        # print("Total plot time: %.3f" % (total_plot_time / counter))
+        print("Total plot: %.3f" % (total_plot_time / counter))
         print("Average runtime: %.3f" % ((time.time() - bag_start) / counter))
 
 
@@ -454,8 +447,7 @@ def executeFlowstar(model, horizon, state, command, waypoint_x, waypoint_y, spee
             str(yaw[0]), str(yaw[1]), str(yaw_dot[0]), str(yaw_dot[1]), str(Fxf[0]), str(Fxf[1]),
             str(Fxr[0]), str(Fxr[1]), str(Fyf[0]), str(Fyf[1]), str(Fyr[0]), str(Fyr[1]), 
             str(beta[0]), str(beta[1]), str(command_speed[0]), str(command_speed[1]), formula]
-        
-    print("Calling CPP:")
+    
     process = subprocess.Popen(args, stdout=subprocess.PIPE)
     # output = ...0.918423,1.20878,1.20878,0.918423,0.918423,2.88629,2.88629,3.17285,3.17285,2.88629;0,0.4,0...
     (output, err) = process.communicate()
