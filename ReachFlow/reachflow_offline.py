@@ -14,6 +14,7 @@ import nav_msgs.msg
 import numpy as np
 #import reach_flow.msg
 #import FlowstarVisual.msg
+from threading import Timer
 import time
 import timeit
 import datetime
@@ -33,6 +34,8 @@ reach_flow_dir = '/home/alvin/Projects/assured_autonomy_car/ReachFlow'
 # save safety invalidations
 SAVE_FILES = False
 
+# max exec time alotted for flowstar (seconds)
+FLOWSTAR_TIMEOUT = 0.01  # 50ms
 
 # need to change the os path to reach_flow/src for the file to be called through roslaunch
 #-amankh
@@ -220,6 +223,8 @@ class Nodo(object):
             start = time.time()
             try:
                 flow = executeFlowstar(model, horizon, self.state, self.command, self.waypoint_x, self.waypoint_y, speed_bound, delta_bound)
+                flow_x = flow[0]
+                flow_y = flow[1]
             except Exception as e:
                 print("Error in executeFlowstar: %s" % e)
                 continue
@@ -228,8 +233,6 @@ class Nodo(object):
             total_flowstar += flowstar_time
              
             start = time.time()
-            flow_x = flow[0]
-            flow_y = flow[1]
             x_list = []
             y_list = []
             x_list_i, y_list_i = [], []
@@ -447,10 +450,19 @@ def executeFlowstar(model, horizon, state, command, waypoint_x, waypoint_y, spee
             str(yaw[0]), str(yaw[1]), str(yaw_dot[0]), str(yaw_dot[1]), str(Fxf[0]), str(Fxf[1]),
             str(Fxr[0]), str(Fxr[1]), str(Fyf[0]), str(Fyf[1]), str(Fyr[0]), str(Fyr[1]), 
             str(beta[0]), str(beta[1]), str(command_speed[0]), str(command_speed[1]), formula]
-    
+
     process = subprocess.Popen(args, stdout=subprocess.PIPE)
-    # output = ...0.918423,1.20878,1.20878,0.918423,0.918423,2.88629,2.88629,3.17285,3.17285,2.88629;0,0.4,0...
-    (output, err) = process.communicate()
+    timer = Timer(FLOWSTAR_TIMEOUT, process.kill)
+    start = time.time()
+    try:
+        timer.start()
+        (output, err) = process.communicate()
+    finally:
+        timer.cancel()
+        if not timer.is_alive():
+            print("Flowstar timed out at %.3f! Now running backup reachflow prediction" % (time.time() - start))
+            return
+
     flow_x = list()
     flow_y = list()
     color_list = list()
