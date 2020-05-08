@@ -1,0 +1,8 @@
+Questions:
+- how ot use lower-dimensional space planning as heuristic  for  higher-dimensional planning
+
+TODO:
+- basic lattice-based planner in python
+- basic incremental A* that reuses previous G-values
+- basic ARA* that iteratively decreases epsilon weighting as time allots
+- Double-check that this method will be ok for our use
