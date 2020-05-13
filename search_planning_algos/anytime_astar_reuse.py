@@ -33,14 +33,16 @@ class ARA(object):
     def compute_path_with_reuse(self, start, goal, eps):
         closed = set()
         incons = []  # states with inconsistent values, but already expanded
-        # fmin = self.open_set[0][0]  # min of minHeap is always first element
+        fmin = self.open_set[0][0]  # min of minHeap is always first element
         
         # visualize order in which states are expanded
         path = {}
 
         i = 0
         # while len(self.open_set) > 0 and self.fgoal > fmin:
-        while len(self.open_set) > 0:
+        while len(self.open_set) > 0 and self.fgoal > fmin:
+            print(self.fgoal)
+            print(self.open_set)
             (_, current) = heapq.heappop(self.open_set)
             closed.add(current)
             path[current] = i  
@@ -56,11 +58,18 @@ class ARA(object):
                     self.G[next] = new_cost
                     h = ARA.heuristic(next, goal)
                     f = ARA.compute_f(g=new_cost, h=h, eps=eps)
-                    # if current == goal: self.fgoal = f
+                    if next == goal: 
+                        self.fgoal = f
+                        print("FOUND GOAL!")
+                        print(self.fgoal)
                     if next not in closed: 
                         heapq.heappush(self.open_set, (f, next))
                     else:
                         incons.append((f, next))
+            
+            # update fmin value
+            if len(self.open_set) > 0:
+                fmin = self.open_set[0][0]
 
         # add the leftover overconsistent states from incons
         for v in incons: heapq.heappush(self.open_set, v)
