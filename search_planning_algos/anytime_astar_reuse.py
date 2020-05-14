@@ -2,12 +2,10 @@
 Key properties of Anytime-Astar:
 - can return at least some solution at any given point
 - improve solution over time until interrupted or converge to optimal solution, given allotted time
-
 General approach:
 - as epsilon inc, weighted A* is faster, but more greedy(so not optimal)
 - initially set epsilon high to return fast solution, and with allotted time, decrease epsilon with each iter to improve solution
 - include incremental A* to reuse previous computations, which should mostly stay the same
-
 Rules of any heuristic:
 - admissible: h(s) <= c*(s,s_goal): heuristic must always under-approximate true cost to goal.. if it ever over-approximates, we might not find the best path since this best path may be deemed higher cost than it should be
 - also h(goal) = 0
@@ -33,14 +31,15 @@ class ARA(object):
     def compute_path_with_reuse(self, start, goal, eps):
         closed = set()
         incons = []  # states with inconsistent values, but already expanded
-        # fmin = self.open_set[0][0]  # min of minHeap is always first element
+        self.update_open_set(eps=eps, goal=goal)
+        fmin = self.open_set[0][0]  # min of minHeap is always first element
         
         # visualize order in which states are expanded
         path = {}
 
         i = 0
         # while len(self.open_set) > 0 and self.fgoal > fmin:
-        while len(self.open_set) > 0:
+        while len(self.open_set) > 0 and self.fgoal > fmin:
             (_, current) = heapq.heappop(self.open_set)
             closed.add(current)
             path[current] = i  
@@ -56,15 +55,35 @@ class ARA(object):
                     self.G[next] = new_cost
                     h = ARA.heuristic(next, goal)
                     f = ARA.compute_f(g=new_cost, h=h, eps=eps)
-                    # if current == goal: self.fgoal = f
+                    if next == goal: 
+                        self.fgoal = f
+                        print("FOUND GOAL!")
+                        print(self.fgoal)
                     if next not in closed: 
                         heapq.heappush(self.open_set, (f, next))
                     else:
                         incons.append((f, next))
+            
+            # update fmin value
+            if len(self.open_set) > 0:
+                fmin = self.open_set[0][0]
 
         # add the leftover overconsistent states from incons
         for v in incons: heapq.heappush(self.open_set, v)
         return path
+
+
+    def update_open_set(self, eps, goal):
+        # call when epsilon changes and overall new f-values need to be computed
+        new_open_set = []
+        for (_, next) in self.open_set:
+            current = self.came_from[next]
+            g = self.G[next]
+            h = ARA.heuristic(next, goal)
+            f = ARA.compute_f(g=g, h=h, eps=eps)
+            heapq.heappush(new_open_set, (f, next))
+        
+        self.open_set = new_open_set
 
 
     def search(self, start, goal):
