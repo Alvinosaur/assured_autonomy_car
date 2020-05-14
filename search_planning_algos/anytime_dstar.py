@@ -24,8 +24,9 @@ import copy
 
 
 class Dstar(object):
-    def __init__(self, graph):
+    def __init__(self, graph, viz_width=3):
         self.graph = graph
+        self.viz_width = viz_width
         # tracks expected cost to move from start to a state
         self.G = dict()  # or can be 2D array with all values init to infinity, change check of whether a state's current g-val < new g-val
         self.open_set = []
@@ -50,13 +51,15 @@ class Dstar(object):
 
             for next in self.graph.neighbors(current):
                 # trans_cost = self.graph.cost(current, next)
-                trans_cost = self.get_trans_cost(current, next)
+                trans_cost, need_update = self.get_trans_cost(current, next, start)
                 new_cost = self.G[current] + trans_cost
+                # TODO: account for the "need_update" variable above to re-update every successor state of this next state 
+
                 if next not in self.G or new_cost < self.G[next]:
                     self.going_to[next] = current
                     self.G[next] = new_cost
-                    h = ARA.heuristic(next, start)
-                    f = ARA.compute_f(g=new_cost, h=h, eps=eps)
+                    h = Dstar.heuristic(next, start)
+                    f = Dstar.compute_f(g=new_cost, h=h, eps=eps)
                     # if current == goal: self.fgoal = f
                     if next not in closed: 
                         heapq.heappush(self.open_set, (f, next))
@@ -82,19 +85,19 @@ class Dstar(object):
         while epsilon >= 1:
             print("EPSILON: %.1f" % epsilon)
             expansions = self.compute_path_with_reuse(start, goal, epsilon)
-            epsilon -= d_eps
-            print("Order of expansions:")
-            viz.draw_grid(self.graph, width=3, number=expansions, start=start, 
-                goal=goal)
-            print()
-            print("G Values:")
-            viz.draw_grid(self.graph, width=3, number=self.G, start=start, 
-                goal=goal)
-            # viz.draw_grid(viz.diagram4, width, number=cost_with_priority, start=start, goal=goal)
-            print()
-            print("Path:")
-            viz.draw_grid(self.graph, width=3, 
-                path=self.reconstruct_path(start, goal))
+            # epsilon -= d_eps
+            # print("Order of expansions:")
+            # viz.draw_grid(self.graph, width=self.viz_width, number=expansions, start=start, 
+            #     goal=goal)
+            # print()
+            # print("G Values:")
+            # viz.draw_grid(self.graph, width=self.viz_width, number=self.G, start=start, 
+            #     goal=goal)
+            # # viz.draw_grid(viz.diagram4, width, number=cost_with_priority, start=start, goal=goal)
+            # print()
+            # print("Path:")
+            # viz.draw_grid(self.graph, width=self.viz_width, 
+            #     path=self.reconstruct_path(start, goal))
             
         return 
 
@@ -107,6 +110,23 @@ class Dstar(object):
         path.append(goal)
         return path
 
+    def get_trans_cost(self, cur, next, start):
+        (x1, y1) = cur
+        (x2, y2) = next
+        (xs, ys) = start
+
+        # normal cost simply euclidean distance
+        if int(abs(x1-x2) + abs(y1-y2)) == 1: cost = 1
+        else: cost = 1.414  # sqrt(2) euclidean distance
+
+        # If next state is reachable by robot, show additional, unknown cost
+        need_update = False
+        if int(abs(x2-xs) + abs(y2-ys)) <= 2:
+            cost += self.graph.cost(cur, next)
+            need_update = (self.graph.cost(cur, next) > 0)
+
+        return cost, need_update
+
     @staticmethod
     def heuristic(a, b):
         (x1, y1), (x2, y2) = a, b
@@ -117,19 +137,16 @@ class Dstar(object):
         # just to be explicit
         return g + eps*h
 
-    @staticmethod
-    def get_trans_cost(cur, next):
-        (x1, y1) = cur
-        (x2, y2) = next
-        if int(abs(x1-x2) + abs(y1-y2)) == 1: return 1
-        else: return 1.414  # sqrt(2) euclidean distance
+        
+
 
 
 def test():
-    start = (0, 0)
-    goal = (5, 6)  # (x, y)
+    start = (3, 0)
+    goal = (6, 6)  # (x, y)
     width = 3
-    dstar = Dstar(viz.diagram3)
+    dstar = Dstar(viz.diagram2, viz_width=width)
+    # for 
     dstar.search(start, goal)
     # viz.draw_grid(viz.diagram4, width, number=cost_so_far, start=start, goal=goal)
     # print()

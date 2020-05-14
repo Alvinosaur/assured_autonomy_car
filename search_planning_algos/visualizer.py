@@ -1,3 +1,4 @@
+import numpy as np
 # Sample code from https://www.redblobgames.com/pathfinding/a-star/
 # Copyright 2014 Red Blob Games <redblobgames@gmail.com>
 #
@@ -67,22 +68,19 @@ class GridWithWeights(SquareGrid):
 diagram4 = GridWithWeights(10, 10)
 diagram4.walls = [(0, 8), (1, 8), (2, 8), (3, 8), (3, 7), (3, 6), 
     (3, 5), (3, 4), (2, 4), (1, 4)]
-diagram4.weights = {loc: 5 for loc in [(3, 4), (3, 5), (4, 1), (4, 2),
-                                       (4, 3), (4, 4), (4, 5), (4, 6),
-                                       (4, 7), (4, 8), (5, 1), (5, 2),
-                                       (5, 3), (5, 4), (5, 5), (5, 6),
-                                       (5, 7), (5, 8), (6, 2), (6, 3),
-                                       (6, 4), (6, 5), (6, 6), (6, 7),
-                                       (7, 3), (7, 4), (7, 5)]}
 
 diagram3 = GridWithWeights(6, 7)
 # (x, y)
 diagram3.walls = [(0,1), (0, 2), (0, 6), (1,4), (2,4), (2,3), (2,2), (2,1), 
     (3,1), (3,2), (4,1), (4,2), (4,4), (4,5), (4,6), (3,6), (2,6), (1,6)]
-diagram3.weights = {loc: 5 for loc in [(3, 4), (3, 5), (4, 1), (4, 2),
-                                       (4, 3), (4, 4), (4, 5), (4, 6),
-                                       (4, 7), (4, 8), (5, 1), (5, 2),
-                                       (5, 3), (5, 4), (5, 5), (5, 6),
-                                       (5, 7), (5, 8), (6, 2), (6, 3),
-                                       (6, 4), (6, 5), (6, 6), (6, 7),
-                                       (7, 3), (7, 4), (7, 5)]}
+
+diagram2 = GridWithWeights(7, 7)           
+diagram2.walls = [(x, 4) for x in range(1, 4+1)]
+no_go_region1 = np.zeros((7,7))
+no_go_region2 = np.zeros((7,7))
+no_go_region1[2:4, 3:5] = 5
+no_go_region2[5, 4:6] = 5
+total_region_costs = no_go_region1 + no_go_region2
+diagram2.weights = {
+    (y,x): total_region_costs[y,x] for y in range(7) for x in range(7)
+}
