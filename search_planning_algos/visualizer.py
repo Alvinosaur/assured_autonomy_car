@@ -1,4 +1,5 @@
 import numpy as np
+import sys
 # Sample code from https://www.redblobgames.com/pathfinding/a-star/
 # Copyright 2014 Red Blob Games <redblobgames@gmail.com>
 #
@@ -9,9 +10,19 @@ import numpy as np
 def from_id_width(id, width):
     return (id % width, id // width)
 
-def draw_tile(graph, id, style, width):
+def draw_tile(graph, id, style, width, use_np_arr):
     r = "."
-    if 'number' in style and id in style['number']: r = "%d" % style['number'][id]
+    if 'number' in style: 
+        if use_np_arr:
+            x, y = id
+            num = style['number'][y,x]
+            if np.isclose(num, sys.float_info.max, atol=1): 
+                r = "Inf"
+            else:
+                r = "%d" % num
+
+        elif id in style['number']:
+            r = "%d" % style['number'][id]
     if 'point_to' in style and style['point_to'].get(id, None) is not None:
         (x1, y1) = id
         (x2, y2) = style['point_to'][id]
@@ -25,10 +36,11 @@ def draw_tile(graph, id, style, width):
     if id in graph.walls: r = "#" * width
     return r
 
-def draw_grid(graph, width=2, **style):
+def draw_grid(graph, width=2, use_np_arr=False, **style):
     for y in range(graph.height):
         for x in range(graph.width):
-            print("%%-%ds" % width % draw_tile(graph, (x, y), style, width), end="")
+            print("%%-%ds" % width % draw_tile(graph, (x, y), style, width, 
+                use_np_arr), end="")
         print()
 
 # data from main article
