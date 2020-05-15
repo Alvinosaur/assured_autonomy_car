@@ -20,6 +20,7 @@ import copy
 
 
 class ARA_v2(object):
+    INF = sys.float_info.max
     def __init__(self, graph):
         self.graph = graph
         self.goal = None
@@ -105,7 +106,7 @@ class ARA_v2(object):
         if self.goal != goal:
             self.goal = goal
             self.G = np.ones(
-                (self.graph.height, self.graph.width)) * sys.float_info.max
+                (self.graph.height, self.graph.width)) * ARA_v2.INF
             ARA_v2.set_value(self.G, start, 0)
             # need this to let computePath know when a state has an old G-value 
             # since this would otherwise not be updated
@@ -113,12 +114,12 @@ class ARA_v2(object):
             # that previous G-values may need updating if edge-costs and map 
             # changes
             self.V = np.ones(
-                (self.graph.height, self.graph.width)) * sys.float_info.max
+                (self.graph.height, self.graph.width)) * ARA_v2.INF
             
             self.open_set = [(0, start)]  # (cost, node), PQ uses first element for priority
             self.came_from = {}
             self.came_from[start] = None
-            self.fgoal = sys.float_info.max
+            self.fgoal = ARA_v2.INF
 
         d_eps = 0.5
         epsilon = 2.5
@@ -320,7 +321,7 @@ def test():
     start = (0, 0)
     goal = (5, 6)  # (x, y)
     width = 3
-    ara = ARA_v2(viz.diagram3)
+    ara = ARA(viz.diagram3)
     ara.search(start, goal)
     # viz.draw_grid(viz.diagram4, width, number=cost_so_far, start=start, goal=goal)
     # print()
