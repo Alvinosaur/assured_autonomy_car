@@ -37,7 +37,7 @@ class ARA_v2(object):
             return {}
         
         i = 0
-        while len(self.open_set) > 0 and self.fgoal > fmin:
+        while len(self.open_set) > 0 and self.fstart > fmin:
             # expand next node w/ lowest f-cost, add to closed
             (_, current) = heapq.heappop(self.open_set)
             closed.add(current)
@@ -62,11 +62,12 @@ class ARA_v2(object):
                     ARA_v2.set_value(self.G, next, new_cost)
 
                     # store this better path to next
-                    self.came_from[next] = current
+                    self.successor[next] = current
 
                     # need to update next's neighbors, so insert updated next 
                     # into openset or incons
-                    h = ARA_v2.heuristic(next, goal)
+                    # NOTE: heuristic defined wrt start since backwards search
+                    h = ARA_v2.heuristic(next, start)
                     f = ARA_v2.compute_f(g=new_cost, h=h, eps=eps)
                     # only insert into openset if not expanded to preserve 
                     # suboptimality bound
@@ -76,8 +77,8 @@ class ARA_v2(object):
                         incons.append((f, next))
 
                     # update fgoal if next is goal
-                    if ARA_v2.node_equal(next, goal): 
-                        self.fgoal = f
+                    if ARA_v2.node_equal(next, start): 
+                        self.fstart = f
             
             # update fmin value
             if len(self.open_set) > 0:
@@ -88,15 +89,14 @@ class ARA_v2(object):
         return path
 
 
-    def update_open_set(self, eps, goal):
+    def update_open_set(self, eps, start):
         # call when epsilon changes and overall new f-values need to be computed
         new_open_set = []
-        for (_, next) in self.open_set:
-            current = self.came_from[next]
-            g = ARA_v2.get_value(self.G, next)
-            h = ARA_v2.heuristic(next, goal)
+        for (_, current) in self.open_set:
+            g = ARA_v2.get_value(self.G, current)
+            h = ARA_v2.heuristic(current, start)
             f = ARA_v2.compute_f(g=g, h=h, eps=eps)
-            heapq.heappush(new_open_set, (f, next))
+            heapq.heappush(new_open_set, (f, current))
         
         self.open_set = new_open_set
 
@@ -107,7 +107,7 @@ class ARA_v2(object):
             self.goal = goal
             self.G = np.ones(
                 (self.graph.height, self.graph.width)) * ARA_v2.INF
-            ARA_v2.set_value(self.G, start, 0)
+            ARA_v2.set_value(self.G, goal, 0)
             # need this to let computePath know when a state has an old G-value 
             # since this would otherwise not be updated
             # though V-values aren't needed in this algo, they represent idea
@@ -116,10 +116,10 @@ class ARA_v2(object):
             self.V = np.ones(
                 (self.graph.height, self.graph.width)) * ARA_v2.INF
             
-            self.open_set = [(0, start)]  # (cost, node), PQ uses first element for priority
-            self.came_from = {}
-            self.came_from[start] = None
-            self.fgoal = ARA_v2.INF
+            self.open_set = [(0, goal)]  # (cost, node), PQ uses first element for priority
+            self.successor = {}
+            self.successor[goal] = None
+            self.fstart = ARA_v2.INF
 
         d_eps = 0.5
         epsilon = 2.5
@@ -127,7 +127,7 @@ class ARA_v2(object):
             shown as integers, they really are floats")
         while epsilon >= 1:
             print("EPSILON: %.1f" % epsilon)
-            self.update_open_set(eps=epsilon, goal=goal)
+            self.update_open_set(eps=epsilon, start=start)
             expansions = self.compute_path_with_reuse(start, goal, epsilon)
             epsilon -= d_eps
             print("Order of expansions:")
@@ -147,13 +147,12 @@ class ARA_v2(object):
         return 
 
     def reconstruct_path(self, start, goal):
-        current = goal
+        current = start
         path = []
-        while current != start:
+        while current != goal:
             path.append(current)
-            current = self.came_from[current]
-        path.append(start)
-        path.reverse() #  reverse (goal -> start) to (start -> goal)
+            current = self.successor[current]
+        path.append(goal)
         return path
 
     @staticmethod
@@ -321,7 +320,7 @@ def test():
     start = (0, 0)
     goal = (5, 6)  # (x, y)
     width = 3
-    ara = ARA(viz.diagram3)
+    ara = ARA_v2(viz.diagram3)
     ara.search(start, goal)
     # viz.draw_grid(viz.diagram4, width, number=cost_so_far, start=start, goal=goal)
     # print()
