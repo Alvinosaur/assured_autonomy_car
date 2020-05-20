@@ -172,7 +172,7 @@ class ARA_v2(object):
     @staticmethod
     def heuristic(a, b):
         (x1, y1), (x2, y2) = a, b
-        return abs(x2 - x1) + abs(y2 - y1)
+        return ((x2 - x1)**2 + (y2 - y1)**2) ** 0.5
 
     @staticmethod
     def compute_f(g, h, eps):
@@ -301,7 +301,7 @@ class ARA(object):
     @staticmethod
     def heuristic(a, b):
         (x1, y1), (x2, y2) = a, b
-        return abs(x2 - x1) + abs(y2 - y1)
+        return ((x2 - x1)**2 + (y2 - y1)**2) ** 0.5
 
     @staticmethod
     def compute_f(g, h, eps):
