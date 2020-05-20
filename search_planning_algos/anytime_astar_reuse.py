@@ -2,12 +2,10 @@
 Key properties of Anytime-Astar:
 - can return at least some solution at any given point
 - improve solution over time until interrupted or converge to optimal solution, given allotted time
-
 General approach:
 - as epsilon inc, weighted A* is faster, but more greedy(so not optimal)
 - initially set epsilon high to return fast solution, and with allotted time, decrease epsilon with each iter to improve solution
 - include incremental A* to reuse previous computations, which should mostly stay the same
-
 Rules of any heuristic:
 - admissible: h(s) <= c*(s,s_goal): heuristic must always under-approximate true cost to goal.. if it ever over-approximates, we might not find the best path since this best path may be deemed higher cost than it should be
 - also h(goal) = 0
@@ -19,6 +17,180 @@ import visualizer  as viz
 import numpy as np
 import sys
 import copy
+
+
+class ARA_v2(object):
+    INF = sys.float_info.max
+    def __init__(self, graph):
+        self.graph = graph
+        self.goal = None
+
+    def compute_path_with_reuse(self, start, goal, eps):
+        closed = set()
+        incons = []  # states with inconsistent values, but already expanded
+        path = {}  # visualize order in which states are expanded
+
+        try:
+            fmin = self.open_set[0][0]  # min of minHeap is always first element
+        except IndexError:
+            print("Nothing in OPENSET, using previous path...")
+            return {}
+        
+        i = 0
+        while len(self.open_set) > 0 and self.fstart > fmin:
+            # expand next node w/ lowest f-cost, add to closed
+            (_, current) = heapq.heappop(self.open_set)
+            closed.add(current)
+
+            # visualize expansion process
+            path[current] = i
+            i += 1
+
+            # V(s) = G(s), make consistent once expand
+            g_cur = ARA_v2.get_value(self.G, current)
+            ARA_v2.set_value(self.V, current, g_cur)
+            
+            # for all neighbors, check if inconsistent, if so update
+            for next in self.graph.neighbors(current):
+                # g(s) + c(s,s')
+                trans_cost = ARA_v2.get_trans_cost(current, next)
+                new_cost = g_cur + trans_cost
+
+                # if g(s) + c(s,s') < g(s'), then found better path
+                if new_cost < ARA_v2.get_value(self.G, next):
+                    # g(s') = g(s) + c(s,s')
+                    ARA_v2.set_value(self.G, next, new_cost)
+
+                    # store this better path to next
+                    self.successor[next] = current
+
+                    # need to update next's neighbors, so insert updated next 
+                    # into openset or incons
+                    # NOTE: heuristic defined wrt start since backwards search
+                    h = ARA_v2.heuristic(next, start)
+                    f = ARA_v2.compute_f(g=new_cost, h=h, eps=eps)
+                    # only insert into openset if not expanded to preserve 
+                    # suboptimality bound
+                    if next not in closed: 
+                        heapq.heappush(self.open_set, (f, next))
+                    else:
+                        incons.append((f, next))
+
+                    # update fgoal if next is goal
+                    if ARA_v2.node_equal(next, start): 
+                        self.fstart = f
+            
+            # update fmin value
+            if len(self.open_set) > 0:
+                fmin = self.open_set[0][0]
+
+        # add the leftover overconsistent states from incons
+        for v in incons: heapq.heappush(self.open_set, v)
+        return path
+
+
+    def update_open_set(self, eps, start):
+        # call when epsilon changes and overall new f-values need to be computed
+        new_open_set = []
+        for (_, current) in self.open_set:
+            g = ARA_v2.get_value(self.G, current)
+            h = ARA_v2.heuristic(current, start)
+            f = ARA_v2.compute_f(g=g, h=h, eps=eps)
+            heapq.heappush(new_open_set, (f, current))
+        
+        self.open_set = new_open_set
+
+        
+    def search(self, start, goal):
+        # replan from scratch
+        if self.goal != goal:
+            self.goal = goal
+            self.G = np.ones(
+                (self.graph.height, self.graph.width)) * ARA_v2.INF
+            ARA_v2.set_value(self.G, goal, 0)
+            # need this to let computePath know when a state has an old G-value 
+            # since this would otherwise not be updated
+            # though V-values aren't needed in this algo, they represent idea
+            # that previous G-values may need updating if edge-costs and map 
+            # changes
+            self.V = np.ones(
+                (self.graph.height, self.graph.width)) * ARA_v2.INF
+            
+            self.open_set = [(0, goal)]  # (cost, node), PQ uses first element for priority
+            self.successor = {}
+            self.successor[goal] = None
+            self.fstart = ARA_v2.INF
+
+        d_eps = 0.5
+        epsilon = 2.5
+        print("NOTE: Graph is literally printed, so even though G-values are\
+            shown as integers, they really are floats")
+        while epsilon >= 1:
+            print("EPSILON: %.1f" % epsilon)
+            self.update_open_set(eps=epsilon, start=start)
+            expansions = self.compute_path_with_reuse(start, goal, epsilon)
+            epsilon -= d_eps
+            print("Order of expansions:")
+            viz.draw_grid(self.graph, width=3, number=expansions, start=start, 
+                goal=goal)
+            print()
+            print("G Values:")
+            viz.draw_grid(self.graph, width=3, use_np_arr=True, number=self.G, 
+                start=start, goal=goal)
+            # viz.draw_grid(viz.diagram4, width, number=cost_with_priority, start=start, goal=goal)
+            print()
+            print("Path:")
+            viz.draw_grid(self.graph, width=3, 
+                path=self.reconstruct_path(start, goal))
+            
+
+        return 
+
+    def reconstruct_path(self, start, goal):
+        current = start
+        path = []
+        while current != goal:
+            path.append(current)
+            current = self.successor[current]
+        path.append(goal)
+        return path
+
+    @staticmethod
+    def get_value(arr, node):
+        x, y = node
+        assert(0 <= x < arr.shape[1] and 0 <= y < arr.shape[0])
+        assert(isinstance(x, int) and isinstance(y, int))
+        return arr[y,x]
+
+    @staticmethod
+    def set_value(arr, node, val):
+        x, y = node
+        assert(0 <= x < arr.shape[1] and 0 <= y < arr.shape[0])
+        assert(isinstance(x, int) and isinstance(y, int))
+        arr[y,x] = val
+
+    @staticmethod
+    def heuristic(a, b):
+        (x1, y1), (x2, y2) = a, b
+        return ((x2 - x1)**2 + (y2 - y1)**2) ** 0.5
+
+    @staticmethod
+    def compute_f(g, h, eps):
+        # just to be explicit
+        return g + eps*h
+
+    @staticmethod
+    def get_trans_cost(cur, next):
+        (x1, y1) = cur
+        (x2, y2) = next
+        if int(abs(x1-x2) + abs(y1-y2)) == 1: return 1
+        else: return 1.414  # sqrt(2) euclidean distance
+
+    @staticmethod
+    def node_equal(n1, n2):
+        x1, y1 = n1
+        x2, y2 = n2
+        return np.isclose(x1, x2, atol=1e-5) and np.isclose(y1, y2, atol=1e-5)
 
 
 class ARA(object):
@@ -47,7 +219,6 @@ class ARA(object):
             closed.add(current)
             path[current] = i  
             i += 1
-            if current == goal: break
 
             for next in self.graph.neighbors(current):
                 # 1 or graph.cost(current, next)
@@ -74,6 +245,19 @@ class ARA(object):
         # add the leftover overconsistent states from incons
         for v in incons: heapq.heappush(self.open_set, v)
         return path
+
+
+    def update_open_set(self, eps, goal):
+        # call when epsilon changes and overall new f-values need to be computed
+        new_open_set = []
+        for (_, next) in self.open_set:
+            current = self.came_from[next]
+            g = self.G[next]
+            h = ARA.heuristic(next, goal)
+            f = ARA.compute_f(g=g, h=h, eps=eps)
+            heapq.heappush(new_open_set, (f, next))
+        
+        self.open_set = new_open_set
 
 
     def search(self, start, goal):
@@ -120,7 +304,7 @@ class ARA(object):
     @staticmethod
     def heuristic(a, b):
         (x1, y1), (x2, y2) = a, b
-        return abs(x2 - x1) + abs(y2 - y1)
+        return ((x2 - x1)**2 + (y2 - y1)**2) ** 0.5
 
     @staticmethod
     def compute_f(g, h, eps):
@@ -139,7 +323,7 @@ def test():
     start = (0, 0)
     goal = (5, 6)  # (x, y)
     width = 3
-    ara = ARA(viz.diagram3)
+    ara = ARA_v2(viz.diagram3)
     ara.search(start, goal)
     # viz.draw_grid(viz.diagram4, width, number=cost_so_far, start=start, goal=goal)
     # print()
@@ -147,4 +331,5 @@ def test():
     #     path=reconstruct_path(came_from, start=start, goal=goal))
 
 
-test()
+if __name__=="__main__":
+    test()
