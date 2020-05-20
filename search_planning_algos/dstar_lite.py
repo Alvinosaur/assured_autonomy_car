@@ -1,15 +1,38 @@
 """
-Key properties of Anytime-Astar:
-- can return at least some solution at any given point
-- improve solution over time until interrupted or converge to optimal solution, given allotted time
-General approach:
-- as epsilon inc, weighted A* is faster, but more greedy(so not optimal)
-- initially set epsilon high to return fast solution, and with allotted time, decrease epsilon with each iter to improve solution
-- include incremental A* to reuse previous computations, which should mostly stay the same
-Rules of any heuristic:
-- admissible: h(s) <= c*(s,s_goal): heuristic must always under-approximate true cost to goal.. if it ever over-approximates, we might not find the best path since this best path may be deemed higher cost than it should be
-- also h(goal) = 0
-- consistent: h(s) <= c(s,s') + h(s'): triangle ineq, heuristic directly from state s(hypotenuse) should always be less than going through another path(legs of triangle)
+Differences from ARA:
+- run backwards search since goal doesn't change, but robot position changes and we want to reuse previous path, which shouldn't change much
+- account for changes to transition costs by updating the successor states of these changed paths
+- specifically, addressing underconsistency by adding them back to inconsistent 
+- in test, path costs are no longer just euclidean distance, but now include terrain factors, and we as robot progresses along path, certain path costs will change
+
+Questions and Answers:
+- When is k1 vs k2 used?
+k1 represents f-value and k2 represents optimal G-value(min(V,G)) where V is the one-step lookahead version of G-value and thus is more accurate. k1 is primarily used for ordering of which nodes to expand from open-set, but in the case of a tie, k2 value is used.
+
+- More info about G v.s V?
+As stated above, V-value is an early prediction of G-value. A state is defined:
+consistent: G = V
+underconsistent: G < V  (underestimated true cost, so need to update path)
+overconsistent: G > V  (overestimated true cost, so may find better path)
+
+
+- When considering "successors" and "predecessors", how to differentiate these?
+These can be abstracted to just consider neighbors of a state, except for the case of the goal state, where its g-value should just be 0 since we need to have a base position to build values from. This is important since we need to be able to form new paths between states, even though they may not have been expanded by each other.
+
+- Are we allowed to re-consider the previous step that we came from after taking a step? In otherwords, can we move backwards?
+Yes, this is important as robot may get stuck in a local optima (dead-end) and needs to be able to "back out" and try other paths.
+
+- Why do we udpate current rather than next when the path-cost from current -> next changes?
+Since we are conducting backward search, one way to think about this is that the start position needs the update even if we are considering start to another state since the other state actually points to start since backward search. Changing current will still propagate changes to the other states eventually.
+
+- What's the the km constant?
+Km accounts for the issue that the start state constantly changes. With backward search, the start is our "goal" that we define our heuristic with respect to, and thus every other node's f-val changes each time start changes. This is handled by just adding some constant, km, that is the sum of the heuristic between each (old start, new start) pair.
+
+- What's with the loop termination condition for computePathWithReuse?
+In normal A*, the loop term is when we expand the goal state, then we know we've found the optimal path. This specifically  happens when the goal state's f-value is the minimum f-val in the open-set. This normal termination condition is fine except for the case where there are other N nodes with the same f-value as the goal. In this case, since there is no ordering btwn nodes of the same f-value, we may end up expanding all N nodes before reaching the goal, so this is an extra optimization. This also ensures we don't expand other unnecessary states if they are guaranteed to produce a worse path than the current path to the goal. Of course, this doesn't hold when the current path is outdated, or inconsistent, wich is why there is the additional "start_inconsistent" condition of the loop.
+
+Implementation Notes:
+1. Note that all states(x,y) are Integers, which is why using them as dictionary keys works. For real-valued-states where decimal precision comes into play, need a better way to store transition costs. Maybe just a look-up table with some discretization and round to nearest state-pair.
 """
 
 import heapq
@@ -192,7 +215,10 @@ class DstarLite(object):
         k2 = min(v, g)
         # k1 = f-value
         h = self.heuristic(cur, self.start)
-        k1 = DstarLite.compute_f(g=k2, h=h, eps=self.eps)
+        # km here accounts for issue where the moving start is our "goal" with 
+        # backward search, so the heuristics always change, but can just add 
+        # constant
+        k1 = DstarLite.compute_f(g=k2, h=h+self.km, eps=self.eps)
         return (k1, k2)
 
     def update_state(self, cur_state):
