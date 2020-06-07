@@ -1,0 +1,17 @@
+{
+    "tasks": [
+        {
+            "type": "shell",
+            "label": "make the makefile",
+            "command": "bash",
+            "args": [
+                "-c",
+                "cd build && cmake ../src/ && make"
+            ],
+            "options": {
+                "cwd": "${workspaceRoot}/wmrde"
+            }
+        }
+    ],
+    "version": "2.0.0"
+}

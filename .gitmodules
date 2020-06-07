@@ -1,3 +1,6 @@
 [submodule "aa_car_platform"]
 	path = aa_car_platform
 	url = git@github.com:Alvinosaur/aa_car_platform.git
+[submodule "wmrde"]
+	path = wmrde
+	url = git@github.com:Alvinosaur/wmrde.git

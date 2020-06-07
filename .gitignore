@@ -2,4 +2,8 @@
 *.pyc
 *.msg_
 *.swo
+*.dvi
+*.log
+*.mexmaci64
+*~
 
