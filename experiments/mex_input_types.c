@@ -4,6 +4,7 @@
 /* Input Arguments */
 #define	MATRIX_IN      prhs[0]
 #define	VEC_IN         prhs[1]
+#define IS_TRANSPOSED  prhs[2]
 
 /* Output Arguments */
 #define	VEC_OUT        plhs[0]
@@ -13,7 +14,7 @@ void mexFunction( int nlhs, mxArray *plhs[],
 { 
     
     /* Check for proper number of arguments */    
-    if (nrhs != 2) { 
+    if (nrhs != 3) { 
 	    mexErrMsgIdAndTxt( "MATLAB:planner:invalidNumInputs",
                 "Three input arguments required."); 
         return;
@@ -24,14 +25,28 @@ void mexFunction( int nlhs, mxArray *plhs[],
     } 
         
     /* get the dimensions and values of M x N matrix */
-    /* Matlab uses column-major order */
+    /* Matlab uses column-major order, but row-major if input is transposed */
     int M = mxGetM(MATRIX_IN);
     int N = mxGetN(MATRIX_IN);
     double* some_matrix = mxGetPr(MATRIX_IN);
+    double* arr = malloc(sizeof(double)*M*N);
     printf("Read in matrix of %d x %d:\n", M, N);
-    for (int c = 0; c < N; c++) {
-        for (int r = 0; r < M; r++){
-            printf("%.3f, ", some_matrix[r*N + c]);
+    int is_transposed = *(int*)mxGetPr(IS_TRANSPOSED);
+    printf("Is Transposed: %d\n", is_transposed);
+    int idx = 0;
+    for (int c = 0; c < M; c++) {
+        for (int r = 0; r < N; r++){
+            arr[idx] = some_matrix[r*M + c];
+            printf("%.2f, ", some_matrix[r*M + c]);
+            idx++;
+        }
+        printf("\n");
+    }
+    
+    printf("Converted:\n");
+    for (int r = 0; r < M; r++) {
+        for (int c = 0; c < N; c++) {
+            printf("%.2f, ", arr[r*N + c]);
         }
         printf("\n");
     }
@@ -50,10 +65,23 @@ void mexFunction( int nlhs, mxArray *plhs[],
     printf("Input vec: [%d, %d]\n", some_vec_0, some_vec_1);
         
     /* Create a 1 x 2 vector as returned output value */ 
-    VEC_OUT = mxCreateNumericMatrix( (mwSize)1, (mwSize)2, mxINT8_CLASS, mxREAL); 
+    M = 3;
+    N = 2; 
+    VEC_OUT = mxCreateNumericMatrix( (mwSize)M, (mwSize)N, mxINT8_CLASS, mxREAL); 
     char* output_ptr = (char*)  mxGetPr(VEC_OUT);
-    output_ptr[0] = 5;
-    output_ptr[1] = 3;
-    
+    char* actual = malloc(sizeof(char)*M*N);
+    // output "trajectory" of 2-vectors
+    // 0, 1
+    // 2, 3
+    // 4, 5
+    char val = 0;
+    for (int ti = 0; ti < M; ti++) {
+        actual[ti*N] = val++;
+        actual[ti*N + 1] = val++;
+    }
+    for (int ti = 0; ti < M; ti++) {
+        output_ptr[0*M + ti] = actual[ti*N];
+        output_ptr[1*M + ti] = actual[ti*N + 1];
+    }
     return;
 }

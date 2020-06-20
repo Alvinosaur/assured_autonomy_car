@@ -4,19 +4,19 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-        // {
-        //     "name": "g++ - Build and debug active file",
-        //     "type": "cppdbg",
-        //     "request": "launch",
-        //     "program": "${workspaceRoot}/a.out",
-        //     "args": [],
-        //     "stopAtEntry": false,
-        //     "cwd": "${workspaceFolder}",
-        //     "environment": [],
-        //     "externalConsole": false,
-        //     "MIMode": "lldb",
-        //     "preLaunchTask": "g++ build active file"
-        // },
+        {
+            "name": "test-high-level-planner",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/planner/build/test_planner",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceRoot}/planner/build",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "preLaunchTask": "build-test-high-level-planner"
+        },
         {
             "name": "Using make to build",
             "type": "cppdbg",

@@ -4,7 +4,22 @@
             "name": "Mac",
             "includePath": [
                 "${workspaceFolder}/**",
-                "/Users/Alvin/Documents/Code/safety_reachability_AV_research/wmrde/include"
+                "/Users/Alvin/Documents/Code/safety_reachability_AV_research/assured_autonomy_car/wmrde/include"
+            ],
+            "defines": [],
+            "macFrameworkPath": [
+                "/System/Library/Frameworks",
+                "/Library/Frameworks"
+            ],
+            "compilerPath": "/usr/bin/clang",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "clang-x64"
+        },
+        {
+            "name": "Mac",
+            "includePath": [
+                "${workspaceRoot}/planner/include"
             ],
             "defines": [],
             "macFrameworkPath": [

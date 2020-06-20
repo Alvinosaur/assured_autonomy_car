@@ -11,6 +11,18 @@
             "options": {
                 "cwd": "${workspaceRoot}/wmrde"
             }
+        },
+        {
+            "type": "shell",
+            "label": "build-test-high-level-planner",
+            "command": "bash",
+            "args": [
+                "-c",
+                "cd build && cmake .. && make"
+            ],
+            "options": {
+                "cwd": "${workspaceRoot}/planner"
+            }
         }
     ],
     "version": "2.0.0"

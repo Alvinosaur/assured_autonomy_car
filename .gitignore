@@ -1,4 +1,5 @@
 */__pycache__
+*.DS_Store
 *.pyc
 *.msg_
 *.swo
@@ -6,4 +7,5 @@
 *.log
 *.mexmaci64
 *~
+*/build/*
 
