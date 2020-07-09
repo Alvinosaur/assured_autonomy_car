@@ -29,6 +29,20 @@
             "externalConsole": false,
             "MIMode": "lldb",
             "preLaunchTask": "make the makefile"
+        },
+        {
+            "name": "lattice dstar lite",
+            "type": "python",
+            "request": "launch",
+            "program": "/Users/Alvin/Documents/Code/safety_reachability_AV_research/assured_autonomy_car/search_planning_algos/lattice_dstar_lite.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "basic lattice",
+            "type": "python",
+            "request": "launch",
+            "program": "/Users/Alvin/Documents/Code/safety_reachability_AV_research/assured_autonomy_car/search_planning_algos/basic_lattice_planner.py",
+            "console": "integratedTerminal"
         }
     ]
 }
