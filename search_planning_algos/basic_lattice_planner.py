@@ -13,7 +13,7 @@ DEBUG = True
 
 
 class Car(object):
-    def __init__(self, L=1.0, max_v=3, max_steer=math.pi/4):
+    def __init__(self, L=1.0, max_v=3, max_steer=math.pi / 4):
         # state = [x, y, theta]
         self.M = 3  # size of state space
 
@@ -22,6 +22,18 @@ class Car(object):
         self.max_steer = max_steer
 
     def rollout(self, state, v, steer, dt, T):
+        """Note: state at timestep 0 is NOT  original state, but next state, so original state is not part of rollout. This means
+        every trajectory contains N successor states not including original state.
+        Args:
+            state ([type]): [description]
+            v ([type]): [description]
+            steer ([type]): [description]
+            dt ([type]): [description]
+            T ([type]): [description]
+
+        Returns:
+            [type]: [description]
+        """
         assert (abs(v) <= self.max_v)
         assert(abs(steer) <= self.max_steer)
         N = int(T / float(dt))  # number of steps
@@ -50,6 +62,15 @@ class Action(object):
 
     def __repr__(self):
         return "steer, v: (%.2f, %.2f)" % (self.steer, self.v)
+
+
+class Node(object):
+    def __init__(self, priority, state):
+        self.priority = priority
+        self.state = state
+
+    def __lt__(self, other):
+        return self.priority < other.priority
 
 
 class BasicLattice(object):
@@ -121,11 +142,13 @@ class BasicLattice(object):
                     state=state, v=action.v, steer=action.steer, dt=self.dt, T=self.T)
 
                 # also precompute distance travelled cost of these primitives
-                if thetai == 0:
-                    dist_so_far = 0
+                if thetai == 0:  # only compute once, identical for any theta
+                    # first next state in traj has dist from orig state
+                    dist_so_far = np.linalg.norm(trajs[0, :2, ai] - state[:2])
+                    self.traj_sample_distances[ai][0] = dist_so_far
                     for si in range(1, self.N):
                         dist_so_far += np.linalg.norm(
-                            trajs[si-1, :2, ai] - trajs[si, :2, ai])
+                            trajs[si - 1, :2, ai] - trajs[si, :2, ai])
                         self.traj_sample_distances[ai][si] = dist_so_far
 
             self.theta_to_trajs[thetai] = trajs
@@ -203,7 +226,7 @@ class BasicLattice(object):
         self.start = np.array(start)
         self.goal = np.array(goal)
         frontier = []
-        heapq.heappush(frontier, (0, self.start))
+        heapq.heappush(frontier, Node(priority=0, state=self.start))
         start_key = self.state_to_key(start)
         came_from = {}
         came_from[start_key] = None
@@ -219,10 +242,11 @@ class BasicLattice(object):
             plt.show()
         i = 0
         while len(frontier) > 0:
-            (_, current) = heapq.heappop(frontier)
+            node = heapq.heappop(frontier)
+            current = node.state
+            print("Expanded: %.2f, %.2f" % (current[0], current[1]))
+            print()
             current_key = self.state_to_key(current)
-            print("%.2f, %.2f, %d\n" %
-                  (current[0], current[1], current[2] * 180 / math.pi))
             expansion_order[current_key] = i
             i += 1
             if self.reached_goal(current):
@@ -238,6 +262,8 @@ class BasicLattice(object):
                     start=self.dt, stop=self.dt + self.T, num=self.N)
                 viz_map_overlay_plan(
                     actions=actions, trajectories=all_trajs, dstate=self.dstate)
+            print()
+
             for ti, traj in enumerate(all_trajs):
                 # iterate through trajectory and add states to open set
                 for si in range(self.N):
@@ -251,12 +277,20 @@ class BasicLattice(object):
                     if next_key not in cost_so_far or new_cost < cost_so_far[next_key]:
                         cost_so_far[next_key] = new_cost
                         # including heuristic makes exploration towards goal a priority
+
                         priority = new_cost + (
                             self.eps * self.heuristic(next, goal))
+                        if np.isclose(actions[ti].steer, 0):
+                            print("(%.2f, %.2f) vel: %.2f" %
+                                  (traj[si, 0], traj[si, 1], actions[ti].v))
+                            print("G: %.2f, f: %.2f, combined: %.2f" %
+                                  (new_cost, self.heuristic(next, goal), priority))
+
                         cost_with_priority[next_key] = priority
-                        heapq.heappush(frontier, (priority, next))
+                        heapq.heappush(frontier, Node(
+                            priority=priority, state=next))
                         # si + 1 since 0th sample in trajectory is not current state
-                        came_from[next_key] = (current, actions[ti], si+1)
+                        came_from[next_key] = (current, actions[ti], si + 1)
 
         if reached_goal:
             states, actions, action_durs = self.unpack(came_from)
@@ -350,10 +384,10 @@ def visualize_rollouts():
     base_vel = 10 * (dx + dy) / 2.0
 
     max_steer = math.pi / 4
-    planner = BasicLattice(map=map, dstate=dstate, min_state=min_state,  T=T,
+    planner = BasicLattice(map=map, dstate=dstate, min_state=min_state, T=T,
                            dt=dt, base_vel=base_vel, max_steer=max_steer)
-    thetas = np.linspace(start=0, stop=7*math.pi/4, num=7)
-    x, y, = X/2, Y/2
+    thetas = np.linspace(start=0, stop=7 * math.pi / 4, num=7)
+    x, y, = X / 2, Y / 2
     ts = np.linspace(start=0, stop=planner.T, num=planner.N)
     for theta in thetas:
         state = [x, y, theta]
@@ -379,14 +413,14 @@ def main():
     T = 1.0
     dt = 0.1
     N = T / dt
-    # one trajectory should cover 10 different states
+    # one trajectory should cover k different states
     base_vel = 10 * (dx + dy) / 2.0
     max_steer = math.pi / 4
 
     # define start (chosen by viewing map with matplotlib)
     # start and goal defined in discrete space
     # which is why dx = dy = 1
-    x0, y0, theta0 = 11, 11, -math.pi/2
+    x0, y0, theta0 = 11, 11, -math.pi / 2
     start = np.array([x0, y0, theta0]) * np.array([dx, dy, 1])
 
     # define goal
@@ -395,8 +429,8 @@ def main():
     goal_thresh = 2 * dstate
 
     # build planner and run
-    eps = 2.0
-    planner = BasicLattice(map=map, dstate=dstate, min_state=min_state,  T=T,
+    eps = 4.0
+    planner = BasicLattice(map=map, dstate=dstate, min_state=min_state, T=T,
                            dt=dt, base_vel=base_vel, max_steer=max_steer, goal_thresh=goal_thresh, eps=eps)
     results = planner.search(start=start, goal=goal)
     if results is None:
@@ -416,7 +450,7 @@ def main():
         duration = action_durs[si]
 
         # update ts for theta graph
-        N = int(duration/dt)
+        N = int(duration / dt)
         ts = np.linspace(start=dt, stop=duration + dt, num=N) + T_offset
 
         # run rollout generator with new planned action
