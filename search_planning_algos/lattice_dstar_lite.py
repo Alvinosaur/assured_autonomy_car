@@ -383,12 +383,19 @@ class LatticeDstarLite(object):
     INF = sys.float_info.max
     MAX_THETA = 2 * math.pi
 
-    def __init__(self, graph: Graph, min_state, dstate, velocities, steer_angles, thetas, dt, T, goal_thresh=None, eps=1.0):
+    def __init__(self, graph: Graph, min_state, dstate, velocities, steer_angles, thetas, dt, T, goal_thresh=None, eps=1.0, viz=False):
         self.min_state = min_state
         self.dstate = dstate
         self.velocities = velocities
         self.thetas = thetas
         self.steer_angles = steer_angles
+        self.viz = viz
+        if viz:
+            f = plt.figure()
+            self.ax = f.add_subplot(111)
+            self.ax.imshow(graph.map)
+            plt.ion()
+            plt.show()
 
         # define action space
         self.graph = graph
@@ -405,6 +412,7 @@ class LatticeDstarLite(object):
             self.goal_thresh = goal_thresh
 
         self.is_new = True
+        self.shifted_start = False
         self.eps = eps
 
         # values that can change if new goal is set
@@ -491,9 +499,12 @@ class LatticeDstarLite(object):
             # if reached start target state, update fstart value
             # implement goal threshold by applying threshold to start since backwards search. If any state is within threshold of start, just pick this state as new start.
             if self.found_start(cur_state):
-                self.km += self.heuristic(self.start, cur_state)
-                self.start = cur_state
-                start_node = self.create_node(self.start)
+                if not self.state_equal(self.start, cur_state):
+                    self.km += self.heuristic(self.start, cur_state)
+                    self.start = cur_state
+                    start_node = self.create_node(self.start)
+                    # return entire path, not just path[1:]
+                    self.shifted_start = True
 
             # get neighbor states update their values if necessary
             all_trajs, dist_costs, actions = self.graph.neighbors(
@@ -503,6 +514,16 @@ class LatticeDstarLite(object):
                 for si in range(traj.shape[0]):
                     next = traj[si, :]
                     self.update_state(next)
+
+                if self.viz:
+                    dx, dy, _, _ = self.dstate
+                    x_data = traj[:, 0] / dx
+                    y_data = traj[:, 1] / dy
+                    self.ax.scatter(x_data, y_data, s=2)
+                    plt.draw()
+
+            if self.viz:
+                plt.pause(1)
 
             # TODO: if reached start target state, update fstart value? Original dstar_lite doesn't do anything meaningful here
 
@@ -531,6 +552,10 @@ class LatticeDstarLite(object):
                 return
 
     def search(self, start, goal, obs_window, window_bounds):
+        self.shifted_start = False  # reset
+        if self.viz:
+            self.ax.clear()
+            self.ax.imshow(self.graph.map)
         if self.start is not None:
             self.km += self.heuristic(self.start, start)
         self.start = start
@@ -658,13 +683,21 @@ class LatticeDstarLite(object):
             heapq.heappush(self.open_set, self.create_node(cur_state))
 
     def reconstruct_path(self):
+        """Returns a path ordered from start to goal. If found state close to,
+        but not exactly the start state, then shifted start is at path[0]. Otherwise, start is not part of path and path[0] is next state. Goal is at path[-1].
+
+        Returns:
+            [type]: [description]
+        """
         cur_key = self.state_to_key(self.start)
         goal_key = self.state_to_key(self.goal)
         path = []
+        if self.shifted_start:
+            # add start if this start isn't exactly original start
+            path.append(self.start)
         while cur_key != goal_key:
-            path.append(self.key_to_state(cur_key))
             cur_key = self.successor[cur_key]
-        path.append(self.goal)
+            path.append(self.key_to_state(cur_key))
         return path
 
     def heuristic(self, s1, s2):
@@ -716,108 +749,6 @@ def get_obs_window_bounds(graph, state, width, height):
     ybounds = (max(0, yi - half_height),
                min(graph.height, yi + half_height))
     return xbounds, ybounds
-
-
-def simulate_plan_execution(start, goal, planner: LatticeDstarLite, true_map, viz=True):
-    dx, dy, _, _ = planner.dstate
-    obs_width = 5
-    obs_height = 5
-
-    # two plots, one for true map, one for known map
-    fig, axs = plt.subplots(2)
-    axs[0].imshow(true_map)
-    fig.suptitle(
-        "Interleaved planning and execution with dstar on lattice graph")
-    axs[0].set_title("True map")
-    axs[0].legend(loc="upper right")
-    axs[0].set(xlabel='X', ylabel='Y')
-
-    axs[0].set_title("Known map")
-    axs[1].legend(loc="upper right")
-    axs[1].set(xlabel='X', ylabel='Y')
-
-    # run interleaved execution and planning
-    while not planner.state_equal(start, goal):
-        # make observation around current state
-        xbounds, ybounds = get_obs_window_bounds(
-            graph=planner.graph, state=start, width=obs_width, height=obs_height)
-        obs_window = true_map[ybounds[0]:ybounds[1],
-                              xbounds[0]: xbounds[1]]
-
-        path = planner.search(
-            start=start, goal=goal, obs_window=obs_window, window_bounds=(xbounds, ybounds))
-
-        # visualize stuff
-        if viz:
-            # Plot y v.s x
-            viz_path = np.array(path)
-            # show planned path on both maps
-            axs[0].plot(viz_path[:, 0] / dx,
-                        viz_path[:, 1] / dy, 'g')
-            axs[1].plot(viz_path[:, 0] / dx,
-                        viz_path[:, 1] / dy, 'g')
-
-            # show updated known map
-            axs[1].imshow(planner.graph.map)
-            # need to show true map too because we clear axes
-            # to show updated path
-            axs[0].imshow(true_map)
-            plt.pause(1)
-            axs[0].clear()
-            axs[1].clear()
-
-        start = path[0]
-
-
-def main():
-    # load in map
-    map_file = "search_planning_algos/maps/map3.npy"
-    map = np.load(map_file)
-    Y, X = map.shape
-    dy, dx = 0.1, 0.1
-    miny, minx = 0, 0
-
-    # define car
-    wheel_radius = 0  # anything non-zero is an obstacle
-
-    # define search params
-    eps = 4
-
-    # define action space
-    velocities = np.linspace(start=1, stop=3, num=3)
-    dv = velocities[1] - velocities[0]
-    dt = 0.1
-    T = 1.0
-    steer_angles = np.linspace(-math.pi / 4, math.pi / 4, num=3)
-
-    # define heading space
-    start, stop, step = 0, 315, 45
-    num_thetas = int((stop - start) / step) + 1
-    thetas = np.linspace(start=0, stop=315, num=num_thetas)
-    thetas = thetas / RAD_TO_DEG  # convert to radians
-    dtheta = step / RAD_TO_DEG
-
-    # collective variables for discretizing C-sapce
-    dstate = np.array([dx, dy, dtheta, dv])
-    min_state = np.array([minx, miny, min(thetas), min(velocities)])
-
-    # create planner and graph
-    graph = Graph(map=map, min_state=min_state, dstate=dstate,
-                  thetas=thetas, velocities=velocities, wheel_radius=wheel_radius)
-    planner = LatticeDstarLite(graph=graph, min_state=min_state, dstate=dstate,
-                               velocities=velocities, steer_angles=steer_angles, thetas=thetas, dt=dt, T=T, eps=eps)
-
-    # define start and  goal (x,y) need to be made continuous
-    # since I selected those points on image map of discrete space
-    start = [50, 70, 0, min_state[-1]] * np.array([dx, dy, 1, 1])
-    # looks like goal should face up, but theta is chosen
-    # in image-frame as is the y-coordinates, so -90 faces
-    # upwards on our screen and +90 faces down
-    goal = [140, 20, -math.pi / 2, min_state[-1]] * np.array([dx, dy, 1, 1])
-
-    # run planner
-    simulate_plan_execution(start=start, goal=goal,
-                            planner=planner, true_map=map)
 
 
 def run_all_tests():
@@ -981,6 +912,111 @@ def test_visualize_primitives(graph):
         plt.pause(2)
         axs[0].clear()
         axs[1].clear()
+
+
+def simulate_plan_execution(start, goal, planner: LatticeDstarLite, true_map, viz=True):
+    dx, dy, _, _ = planner.dstate
+    obs_width = 5
+    obs_height = 5
+
+    # two plots, one for true map, one for known map
+    f = plt.figure()
+    axs0 = f.add_subplot(211)
+    axs1 = f.add_subplot(212)
+    axs0.imshow(true_map)
+    axs1.imshow(planner.graph.map)
+    f.suptitle(
+        "Interleaved planning and execution with dstar on lattice graph")
+    axs0.set_title("True map")
+    axs0.legend(loc="upper right")
+    axs0.set(xlabel='X', ylabel='Y')
+
+    axs1.set_title("Known map")
+    axs1.legend(loc="upper right")
+    axs1.set(xlabel='X', ylabel='Y')
+
+    # run interleaved execution and planning
+    while not planner.state_equal(start, goal):
+        # make observation around current state
+        xbounds, ybounds = get_obs_window_bounds(
+            graph=planner.graph, state=start, width=obs_width, height=obs_height)
+        obs_window = true_map[ybounds[0]:ybounds[1],
+                              xbounds[0]: xbounds[1]]
+
+        path = planner.search(
+            start=start, goal=goal, obs_window=obs_window, window_bounds=(xbounds, ybounds))
+
+        # visualize stuff
+        if viz:
+            axs0.clear()
+            axs1.clear()
+            # Plot y v.s x
+            viz_path = np.array(path)
+            # show planned path on both maps
+            axs0.plot(viz_path[:, 0] / dx,
+                      viz_path[:, 1] / dy, c='g', markersize=2)
+            axs1.plot(viz_path[:, 0] / dx,
+                      viz_path[:, 1] / dy, c='g', markersize=2)
+
+            # show updated known map
+            axs1.imshow(planner.graph.map)
+            # need to show true map too because we clear axes
+            # to show updated path
+            axs0.imshow(true_map)
+            plt.pause(1)
+
+        start = path[0]
+
+
+def main():
+    # load in map
+    map_file = "search_planning_algos/maps/map3.npy"
+    map = np.load(map_file)
+    Y, X = map.shape
+    dy, dx = 0.1, 0.1
+    miny, minx = 0, 0
+
+    # define car
+    wheel_radius = 0  # anything non-zero is an obstacle
+
+    # define search params
+    eps = 4
+
+    # define action space
+    velocities = np.linspace(start=1, stop=3, num=3)
+    dv = velocities[1] - velocities[0]
+    dt = 0.1
+    T = 1.0
+    steer_angles = np.linspace(-math.pi / 4, math.pi / 4, num=3)
+
+    # define heading space
+    start, stop, step = 0, 315, 45
+    num_thetas = int((stop - start) / step) + 1
+    thetas = np.linspace(start=0, stop=315, num=num_thetas)
+    thetas = thetas / RAD_TO_DEG  # convert to radians
+    dtheta = step / RAD_TO_DEG
+
+    # collective variables for discretizing C-sapce
+    dstate = np.array([dx, dy, dtheta, dv])
+    min_state = np.array([minx, miny, min(thetas), min(velocities)])
+
+    # create planner and graph
+    graph = Graph(map=map, min_state=min_state, dstate=dstate,
+                  thetas=thetas, velocities=velocities, wheel_radius=wheel_radius)
+    planner = LatticeDstarLite(graph=graph, min_state=min_state, dstate=dstate,
+                               velocities=velocities, steer_angles=steer_angles, thetas=thetas, dt=dt, T=T, eps=eps, viz=True)
+
+    # define start and  goal (x,y) need to be made continuous
+    # since I selected those points on image map of discrete space
+    start = [50, 70, 0, min_state[-1]] * np.array([dx, dy, 1, 1])
+    # looks like goal should face up, but theta is chosen
+    # in image-frame as is the y-coordinates, so -90 faces
+    # upwards on our screen and +90 faces down
+    goal = [140, 20, -math.pi / 2, min_state[-1]] * np.array([dx, dy, 1, 1])
+
+    # run planner
+    simulate_plan_execution(start=start, goal=goal,
+                            planner=planner, true_map=map)
 
 
 if __name__ == "__main__":
