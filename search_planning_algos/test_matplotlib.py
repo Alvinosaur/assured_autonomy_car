@@ -25,15 +25,14 @@ ax.set_xlim(0, 20)
 ax.set_ylim(0, 10)
 d = random_gen()
 
-line, = ax.plot(a1)
+# line, = ax.plot([], [])
 plt.ion()
 plt.ylim([0, 10])
 plt.show()
 
 for i in range(0, 20):
-    a1.appendleft(next(d))
-    datatoplot = a1.pop()
-    line.set_data([i, i + 5], [i, i + 5])
+    # line.set_data([i, i + 5], [i, i + 5])
+    ax.scatter([i, i + 5], [i, i + 5], s=2)
     plt.draw()
     i += 1
     time.sleep(0.1)

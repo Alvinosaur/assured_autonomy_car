@@ -20,11 +20,11 @@ def thetadot(v, curvature):
 
 
 def example_turn_rad():
-    k = 1/3.0  # curvature
+    k = 1 / 3.0  # curvature
     v = 1.0  # velocity
     dt = 0.1
     T = 3.0  # horizon(sec)
-    N = int(T/dt)
+    N = int(T / dt)
     traj = np.zeros(shape=(N, 3))  # x, y, theta
     x, y, theta = [0] * 3
 
@@ -80,17 +80,17 @@ def gen_mprims(T, dt, viz=True, theta_offset=0.0):
     max_k = 1 / 3.0
     curvature_s = np.linspace(start=-max_k, stop=max_k, num=5, endpoint=True)
 
-    # all velocity profiles
-    vels = [-1.0, -2.0, 1.0, 2.0]
+    # all velocity profiles (absolute value)
+    vels = [1.0, 2.0]
 
     mprims = [[k, v] for k in curvature_s for v in vels]
 
-    N = int(T/dt)
+    N = int(T / dt)
     traj = np.zeros(shape=(N, 3, len(mprims)))  # x, y, theta
 
     for i in range(1, N):
         for prim_i, (k, v) in enumerate(mprims):
-            [x, y, theta] = traj[i-1, :, prim_i]
+            [x, y, theta] = traj[i - 1, :, prim_i]
             theta += thetadot(v, k) * dt
             x += xdot(v, theta) * dt
             y += ydot(v, theta) * dt
@@ -100,7 +100,8 @@ def gen_mprims(T, dt, viz=True, theta_offset=0.0):
     rot_mat = np.array([[math.cos(theta_offset), -math.sin(theta_offset)],
                         [math.sin(theta_offset), math.cos(theta_offset)]])
     for prim_i in range(len(mprims)):
-        traj[:, 0:2, prim_i] = traj[:, 0:2, prim_i] @ rot_mat
+        yx_coords = np.fliplr(traj[:, 0:2, prim_i])
+        traj[:, 0:2, prim_i] = np.fliplr(yx_coords @ rot_mat)
 
     # visualize
     if viz:
