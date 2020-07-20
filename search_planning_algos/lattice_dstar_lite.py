@@ -31,6 +31,8 @@ Differences from original dstar-lite:
 
 For testing with a map generated from image and picking points using matplotlib GUI, (x,y) is valid, but our orientation is wrong. Moving up screen is -90, moving down is +90deg.
 
+On 7/19, added time to state so plan not only finds shortest-path, but also fastest path since two states with same position but diff velocities are always expanded together.
+
 TODOS:
 - get_and_update_trans_cost()... bullet point #3 above
 - use rollout generator with dynamics rather than current approach of kinematics
@@ -64,14 +66,14 @@ class Car(object):
     """
 
     def __init__(self, L=1.0, max_v=3, max_steer=math.pi / 4):
-        # state = [x, y, theta, v]
-        self.M = 4  # size of state space
+        # state = [x, y, theta, v, t]
+        self.M = 5  # size of state space
 
         self.L = 1.0  # length of car
         self.max_v = max_v
         self.max_steer = max_steer
 
-    def rollout(self, state, v, steer, dt, T):
+    def rollout(self, state, v, steer, dt, T, t0=0):
         """Note: state at timestep 0 is NOT  original state, but next state, so original state is not part of rollout. This means
         every trajectory contains N successor states not including original state.
         Args:
@@ -88,8 +90,9 @@ class Car(object):
         assert(abs(steer) <= self.max_steer)
         N = int(T / float(dt))  # number of steps
         traj = np.zeros(shape=(N, self.M))
-        traj[:, -1] = v  # constant velocity throughout
+        traj[:, 3] = v  # constant velocity throughout
         state = np.array(state[:3])
+        t = t0
         for i in range(N):
             theta = state[2]
 
@@ -101,7 +104,9 @@ class Car(object):
 
             # update state and store
             state = state + state_dot * dt
-            traj[i, :-1] = state
+            t += dt
+            traj[i, :3] = state
+            traj[i, -1] = t
 
         return traj
 
@@ -116,23 +121,11 @@ class LatticeNode(Node):
 
     def __init__(self, k1, k2, state):
         super().__init__(k1, k2, state)
-        assert(len(state) == 4)  # 4 states for [x,y,theta,vel]
-
-    def full_str(self):
-        if np.isclose(self.k1, LatticeDstarLite.INF):
-            k1 = "INF"
-        else:
-            k1 = "%.2f" % self.k1
-        if np.isclose(self.k2, LatticeDstarLite.INF):
-            k2 = "INF"
-        else:
-            k2 = "%.2f" % self.k2
-        return "({},{},{},{}):[{},{}]".format(
-            self.state[0], self.state[1], self.state[2], self.state[3], k1, k2)
+        assert(len(state) == 5)  # 4 states for [x,y,theta,vel,t]
 
     def __repr__(self):
-        return "({},{},{},{})".format(
-            self.state[0], self.state[1], self.state[2], self.state[3])
+        return "%.2f,%.2f,%.2f,%.2f,%.2f, k1, k2: %.2f, %.2f" % (
+            self.state[0], self.state[1], self.state[2], self.state[3], self.state[4], k1, k2)
 
 
 class Action(object):
@@ -149,7 +142,7 @@ class Action(object):
 
 
 class Graph(object):
-    def __init__(self, map, min_state, dstate, thetas, velocities, wheel_radius, minx=0, miny=0):
+    def __init__(self, map, min_state, dstate, thetas, velocities, wheel_radius, cost_weights, minx=0, miny=0):
         """Note: state at timestep 0 is NOT  original state, but next state, so original state is not part of rollout.
 
         Args:
@@ -170,6 +163,9 @@ class Graph(object):
         self.velocities = velocities
         self.wheel_radius = wheel_radius
 
+        # very planner-specific
+        self.dist_weight, self.time_weight, self.roughness_weight = cost_weights
+
     def generate_trajectories_and_costs(self, mprim_actions,
                                         base_trajs, state0):
         # N x 3 X M for N timesteps and M primitives
@@ -177,7 +173,7 @@ class Graph(object):
         assert (len(base_trajs.shape) == 3)  # 3 dimensional
         self.N, state_dim, self.num_prims = base_trajs.shape
         assert(len(mprim_actions) == self.num_prims)
-        assert (state_dim == 4)  # x, y, theta, v
+        assert (state_dim == 5)  # x, y, theta, v, t
 
         # basic primitives that will be rotated and translated
         # based on current state
@@ -189,10 +185,6 @@ class Graph(object):
         # precompute rotated base trajectories for every discrete heading bin
         self.theta_to_trajs = [None] * len(self.thetas)
 
-        # store distance-traveled so far for all timesteps for base trajectories
-        self.traj_sample_distances = [
-            [0] * self.N for _ in range(self.num_prims)]
-
         # TODO: more accurate way is to compute for every x,y in trajectory
         # the overlapping cells of car(need width,length of car)
         # but for now just use the x,y states only
@@ -202,7 +194,7 @@ class Graph(object):
             new_trajs = np.copy(self.base_trajs)
 
             # offset theta simply added with base thetas
-            new_trajs[:, 2, :] += theta_offset
+            new_trajs[:, self.get_theta(index=True), :] += theta_offset
 
             # create SE2 rotation using theta offset
             rot_mat = np.array([
@@ -212,28 +204,17 @@ class Graph(object):
             # apply rotation to every primitive's trajectory
             for ai in range(self.num_prims):  # action-index = ai
                 # since trajectories stored as [x,y], flip to [y,x] to properly be rotated by SE2 matrix
-                yx_coords = np.fliplr(new_trajs[:, 0: 2, ai])
+                yx_coords = np.fliplr(new_trajs[:, 0:2, ai])
 
                 # flip back to [x,y] after applying rotation
-                new_trajs[:, 0: 2, ai] = np.fliplr(yx_coords @ rot_mat)
+                new_trajs[:, 0:2, ai] = np.fliplr(yx_coords @ rot_mat)
 
-                # also precompute distance travelled cost of these primitives
-                if ti == 0:  # only compute once, identical for any theta
-                    # first next state in traj has dist from orig state
-                    dist_so_far = np.linalg.norm(
-                        new_trajs[0, :2, ai] - state0[:2])
-                    self.traj_sample_distances[ai][0] = dist_so_far
-                    # for each step in trajectory after first step
-                    for si in range(1, self.N):
-                        dist_so_far += np.linalg.norm(
-                            new_trajs[si - 1, :2, ai] - new_trajs[si, :2, ai])
-                        self.traj_sample_distances[ai][si] = dist_so_far
             self.theta_to_trajs[ti] = new_trajs
             # self.all_disc_traj.append(
             #     self.discretize(new_trajs, is_traj=True))
 
     def neighbors(self, state, predecessor=False):
-        """Lookup associated base trajectory for this  theta heading. Make a copy  and apply translation of current state position. Should return a trajectory of valid positions
+        """Lookup associated base trajectory for this  theta heading. Make a copy  and apply translation of current state position. Should return a trajectory of valid positions. For neighbor trajectories, uses base precomputed trajectories offset with offset of current position and time.
 
         Args:
             state ([type]): [description]
@@ -245,20 +226,21 @@ class Graph(object):
 
         # Need to copy since we destructively modify state
         state = np.array(state)
-        x, y, _, _ = state
+        x, y, _, _, t = state
 
         # if obtaining predecessors, flip theta
         # to treat as searching backwards
         if predecessor:
-            state[2] += math.pi
-        _, _, theta_i, _ = self.discretize(state)
+            state[self.get_theta(index=True)] += math.pi
+        _, _, theta_i, _, _ = self.discretize(state)
         assert (0 <= theta_i < len(self.thetas))
         base_trajs = np.copy(self.theta_to_trajs[theta_i])
         costs = []
         valid_trajs = []
 
-        translation = np.array([x, y, 0, 0])
+        translation = np.array([x, y, 0, 0, t])
         for ai, action in enumerate(self.mprim_actions):
+            # apply translation in position and time
             new_traj = base_trajs[:, :, ai] + translation
             # NOTE: destructively modify trajs
             per_sample_cost, new_traj = self.calc_cost_and_validate_traj(
@@ -266,7 +248,7 @@ class Graph(object):
 
             # if generating predecessors, need to flip back their thetas to original orientation that state was facing
             if predecessor:
-                new_traj[:, 2] -= math.pi
+                new_traj[:, self.get_theta(index=True)] -= math.pi
 
             costs.append(per_sample_cost)
             valid_trajs.append(new_traj)
@@ -298,8 +280,8 @@ class Graph(object):
                  minxi: maxxi] = obs_window
         return need_update
 
-    def calc_cost_and_validate_traj(self, current, traj, action, ai):
-        """Destructively modify traj to only include valid  states
+    def calc_cost_and_validate_traj(self, orig, traj, action, ai):
+        """Destructively modify traj to only include valid  states. Usually costs should be determined by planner, not the map module, but easier to leave all costing here since cost is heavily dependent on map terrain and distance traveled, so avoid copying over map to planner.
 
         Args:
             current ([type]): [description]
@@ -310,80 +292,121 @@ class Graph(object):
         Returns:
             [type]: [description]
         """
-        assert(self.is_valid_state(current))
+        assert(self.is_valid_state(orig))
         # TODO: add slight penalty for non-straight paths?
-        per_sample_cost = copy.copy(self.traj_sample_distances[ai])
+        per_sample_cost = [0] * self.N
+
+        prev_coord = np.array(
+            [self.get_x(state=orig),   # x
+             self.get_y(state=orig),   # y
+             self.get_map_val(orig)])  # z
+        dist = 0
+
         # along traj, if one state becomes invalid, all other successors
         # also are invalid
-        init_xi, init_yi, _, _ = self.discretize(current)
-        init_z = self.map[init_yi, init_xi]
-        vert_dist = 0
         now_invalid = False
-        prev_state = traj[0, :]
+        prev_state = np.copy(traj[0, :])
         for i in range(self.N):
-            if vert_dist > 50:
-                print(vert_dist, cur_z, init_z)
-            if (not self.is_valid_state(traj[i, :]) or
-                    self.check_collision(prev_state, traj[i, :])):
+            current = np.copy(traj[i, :])
+            # if collide  with obstacle or move out-of-bounds, truncate and return
+            if (not self.is_valid_state(current) or
+                    self.is_collision(prev_state, current)):
                 return per_sample_cost[0:i], traj[0:i, :]
-            else:
-                xi, yi, _, _ = self.discretize(traj[i, :])
-                cur_z = self.map[yi, xi]
-                if i == 0:
-                    vert_dist += (init_z - cur_z) ** 2
-                else:
-                    pxi, pyi, _, _ = self.discretize(traj[i - 1, :])
-                    prev_z = self.map[pyi, pxi]
-                    vert_dist += (prev_z - cur_z) ** 2
-                per_sample_cost[i] += vert_dist
 
-            # used for collision-checking transition btwn two states
-            prev_state = traj[i, :]
+            cost = 0
+            # calculate distance-traveled cost
+            cur_coord = np.array(
+                [self.get_x(state=current),   # x
+                 self.get_y(state=current),   # y
+                 self.get_map_val(current)])  # z
+            dist += np.linalg.norm(cur_coord - prev_coord)
+            cost += self.dist_weight * dist
+
+            # calculate time-based cost
+            cost += self.time_weight * self.get_time(state=current)
+
+            # store cost
+            per_sample_cost[i] = cost
+
+            # update prev state and coord
+            prev_state = current
+            prev_coord = cur_coord
 
         # no collisions or out-of-bounds, so return full costs and trajectory
         return per_sample_cost, traj
 
     def is_valid_state(self, state):
-        xi, yi, thetai, vi = self.discretize(state)
+        xi, yi, thetai, vi, ti = self.discretize(state)
         return (0 <= xi < self.width and
                 0 <= yi < self.height and
                 0 <= thetai < len(self.thetas) and
-                0 <= vi < len(self.velocities))
+                0 <= vi < len(self.velocities) and
+                0 <= ti)
 
-    def check_collision(self, prev, next):
-        assert(self.is_valid_state(prev))
-        assert(self.is_valid_state(next))
-        # check if change in height > threshold
-        x1, y1, _, _ = self.discretize(prev)
-        x2, y2, _, _ = self.discretize(next)
-        prev_z = self.map[y1, x1]
-        cur_z = self.map[y2, x2]
+    def is_collision(self, prev, next):
+        prev_z = self.get_map_val(prev)
+        cur_z = self.get_map_val(next)
         # TODO Make car wheel a parameter passed in
         return abs(cur_z - prev_z) > self.wheel_radius
 
     def get_map_val(self, state):
         assert(self.is_valid_state(state))
-        xi, yi, _, _ = self.discretize(state)
+        xi, yi, _, _, _ = self.discretize(state)
         return self.map[yi, xi]
 
     def discretize(self, state):
         state_key = np.round(
             (np.array(state) - self.min_state) / self.dstate).astype(int)
-        xi, yi, thetai, vi = state_key
-        # handle angle wraparound after rounding to nearest int in case
-        # floating error causes modulo operation to mess up
-        thetai = thetai % len(self.thetas)
-        return (xi, yi, thetai, vi)
+
+        # wrap around theta back to [0, 2pi]
+        state_key[self.get_theta(index=True)] %= len(self.thetas)
+        return tuple(state_key)
 
     def make_continuous(self, disc_state):
         return (np.array(disc_state) * self.dstate) + self.min_state
 
+    # reduce chance of index bugs
+    @staticmethod
+    def get_x(state=None, index=False):
+        if index:
+            return 0
+        return state[0]
+
+    @staticmethod
+    def get_y(state=None, index=False):
+        if index:
+            return 1
+        return state[1]
+
+    @staticmethod
+    def get_theta(state=None, index=False):
+        if index:
+            return 2
+        return state[2]
+
+    @staticmethod
+    def get_vel(state=None, index=False):
+        if index:
+            return 3
+        return state[3]
+
+    @staticmethod
+    def get_time(state=None, index=False):
+        if index:
+            return 4
+        return state[4]
+
+    @staticmethod
+    def state_to_str(state):
+        return "(%.2f,%.2f,%.2f,%.2f, %.2f)" % (
+            state[0], state[1], state[2], state[3], state[4])
+
 
 class LatticeDstarLite(object):
-    INF = sys.float_info.max
+    INF = 1e10
     MAX_THETA = 2 * math.pi
 
-    def __init__(self, graph: Graph, min_state, dstate, velocities, steer_angles, thetas, dt, T, goal_thresh=None, eps=1.0, viz=False):
+    def __init__(self, graph: Graph, min_state, dstate, velocities, steer_angles, thetas, T, goal_thresh=None, eps=1.0, viz=False):
         self.min_state = min_state
         self.dstate = dstate
         self.velocities = velocities
@@ -401,7 +424,7 @@ class LatticeDstarLite(object):
         self.graph = graph
         self.actions = [Action(v=v, steer=steer)
                         for steer in steer_angles for v in velocities]
-        self.dt = dt
+        self.dt = self.get_time(state=dstate)
         self.T = T
         self.N = int(self.T / self.dt)
         self.precompute_all_primitives()
@@ -410,6 +433,7 @@ class LatticeDstarLite(object):
             self.goal_thresh = np.linalg.norm(self.dstate[:2])
         else:
             self.goal_thresh = goal_thresh
+        self.heading_thresh = self.get_theta(state=dstate)
 
         self.is_new = True
         self.shifted_start = False
@@ -427,8 +451,8 @@ class LatticeDstarLite(object):
         self.state_space_dim = (self.graph.width, self.graph.height,
                                 len(self.thetas), len(self.velocities))
         # G and V values explained in dstar_lite.py
-        self.G = np.ones(shape=self.state_space_dim) * self.INF
-        self.V = np.copy(self.G)
+        self.G = dict()
+        self.V = dict()
 
     def precompute_all_primitives(self):
         # not a fully-defined state, but used as origin
@@ -437,20 +461,20 @@ class LatticeDstarLite(object):
         self.car = Car(max_steer=max(self.steer_angles),
                        max_v=max(self.velocities))
 
-        # N x 4 X M for N timesteps and M primitives
+        # N x 5 X M for N timesteps and M primitives
         self.base_trajs = np.zeros(
             shape=(self.N, len(self.dstate), len(self.actions)))
         for ai, action in enumerate(self.actions):
             self.base_trajs[:, :, ai] = self.car.rollout(
-                state=state0, v=action.v, steer=action.steer, dt=self.dt, T=self.T)
+                state=state0, v=action.v, steer=action.steer, dt=self.dt, T=self.T, t0=0)
 
         self.graph.generate_trajectories_and_costs(
             mprim_actions=self.actions, base_trajs=self.base_trajs, state0=state0)
 
     def set_new_goal(self, goal):
         self.goal = goal
-        self.V.fill(self.INF)
-        self.G.fill(self.INF)
+        self.V = dict()
+        self.G = dict()
         self.set_value(self.V, goal, 0)
         self.open_set = [self.create_node(goal)]
         self.successor = dict()
@@ -481,7 +505,7 @@ class LatticeDstarLite(object):
             #                                    str(list(self.graph.neighbors(cur_node.state)))))
             # print("Current: %s" % cur_node)
             cur_state = cur_node.state
-            print(cur_state)
+            print("Expanded: %s" % self.state_to_str(cur_state))
 
             # track order of states expanded
             expand_order.append(cur_state)
@@ -499,7 +523,8 @@ class LatticeDstarLite(object):
             # if reached start target state, update fstart value
             # implement goal threshold by applying threshold to start since backwards search. If any state is within threshold of start, just pick this state as new start.
             if self.found_start(cur_state):
-                if not self.state_equal(self.start, cur_state):
+                # time of course won't be the same
+                if not self.state_equal(self.start, cur_state, ignore_time=True):
                     self.km += self.heuristic(self.start, cur_state)
                     self.start = cur_state
                     start_node = self.create_node(self.start)
@@ -511,12 +536,14 @@ class LatticeDstarLite(object):
                 cur_state, predecessor=True)
             for ti, traj in enumerate(all_trajs):
                 # iterate through trajectory and add states to open set
+                print()
+                print("Action: %s" % str(actions[ti]))
                 for si in range(traj.shape[0]):
                     next = traj[si, :]
                     self.update_state(next)
 
                 if self.viz:
-                    dx, dy, _, _ = self.dstate
+                    dx, dy, _, _, _ = self.dstate
                     x_data = traj[:, 0] / dx
                     y_data = traj[:, 1] / dy
                     self.ax.scatter(x_data, y_data, s=2)
@@ -559,7 +586,8 @@ class LatticeDstarLite(object):
         if self.start is not None:
             self.km += self.heuristic(self.start, start)
         self.start = start
-        if self.goal is None or not self.state_equal(self.goal, goal):
+        # time irrelevant for goal so ignore
+        if self.goal is None or not self.state_equal(self.goal, goal, ignore_time=True):
             self.set_new_goal(goal)
 
         # in case goal isn't reachable from start, mark closest to start
@@ -593,28 +621,17 @@ class LatticeDstarLite(object):
     def get_min_g_val(self, cur):
         min_g = self.INF
         best_neighbor = None
-        all_trajs, dist_costs, actions = self.graph.neighbors(cur)
+        all_trajs, trans_cost, actions = self.graph.neighbors(cur)
         for ti, traj in enumerate(all_trajs):
             # iterate through trajectory and add states to open set
             for si in range(traj.shape[0]):
                 next = traj[si, :]
-                trans_cost = dist_costs[ti][si] + self.get_cost(next)
-                cost = (trans_cost + self.get_value(self.G, next))
+                cost = (trans_cost[ti][si] + self.get_value(self.G, next))
                 if cost < min_g or best_neighbor is None:
                     min_g = cost
                     best_neighbor = next
 
         return min_g, best_neighbor
-
-    def get_cost(self, state):
-        """Planner-specific cost unrelated to simple euclidean distance that graph map provides
-
-        Args:
-            state ([type]): [description]
-        """
-        # TODO: Make intelligent cost functions about safety
-        roughness = 0
-        return roughness
 
     def create_node(self, cur):
         k1, k2 = self.get_k(cur)
@@ -625,42 +642,39 @@ class LatticeDstarLite(object):
         g = self.get_value(self.G, cur)
         k2 = min(v, g)
         # k1 = f-value
-        h = self.heuristic(cur, self.start)
+        h = self.heuristic(cur)
         # km here accounts for issue where the moving start is our "goal" with
         # backward search, so the heuristics always change, but can just add
         # constant
-        k1 = self.compute_f(g=k2, h=h + self.km, eps=self.eps)
+        k1 = self.compute_f(g=k2, h=h + self.km, eps=self.eps, )
+        print("%s: g(%.2f) + eps*h(%.2f) = (%.2f):" % (
+            self.state_to_str(cur), k2, k1 - k2, k1))
         return (k1, k2)
 
-    def state_to_key(self, state, is_traj=False):
-        """Convert a state to unique key that also is used to index into G and V value matrices. Unlike simple hashing, where the actual value of a state key is not important, but only the uniqueness, here actual key values must be constrained between [0, dim_max] of that dimension to index into G and V value arrays.
+    def state_to_key(self, state):
+        """Discretizes a state with self.dstate. Takes care of discretized
+        theta wraparound. Returns hashable tuple.
 
         Args:
             state ([type]): [description]
-            is_traj (bool, optional): [description]. Defaults to False.
 
         Returns:
             [type]: [description]
         """
-        state = np.array(state)
-        if is_traj:
-            assert (isinstance(state, np.ndarray))
-            return np.round(
-                (state - self.min_state) / self.dstate).astype(int)
-        else:
-            state_key = np.round(
-                (np.array(state) - self.min_state) / self.dstate).astype(int)
-            xi, yi, thetai, vi = state_key
-            thetai = thetai % len(self.thetas)
-            assert (self.is_valid_key(state_key=(xi, yi, thetai, vi)))
-            return (xi, yi, thetai, vi)
+        state_key = np.round(
+            (np.array(state) - self.min_state) / self.dstate).astype(int)
+
+        # wrap around theta back to [0, 2pi]
+        state_key[self.get_theta(index=True)] %= len(self.thetas)
+        return tuple(state_key)
 
     def is_valid_key(self, state_key):
-        xi, yi, thetai, vi = state_key
+        xi, yi, thetai, vi, ti = state_key
         return ((0 <= xi < self.graph.width) and
                 (0 <= yi < self.graph.height) and
                 (0 <= thetai < len(self.thetas)) and
-                (0 <= vi < len(self.velocities)))
+                (0 <= vi < len(self.velocities)) and
+                0 <= ti)
 
     def key_to_state(self, key):
         return (np.array(key) * self.dstate) + self.min_state
@@ -670,7 +684,7 @@ class LatticeDstarLite(object):
         self.remove_from_open(cur_state)
 
         # get updated g-value of current state
-        if not self.state_equal(cur_state, self.goal):
+        if not self.state_equal(cur_state, self.goal, ignore_time=True):
             min_g, best_neighbor = self.get_min_g_val(cur_state)
             self.set_value(self.V, cur_state, min_g)
             self.successor[self.state_to_key(
@@ -700,15 +714,26 @@ class LatticeDstarLite(object):
             path.append(self.key_to_state(cur_key))
         return path
 
-    def heuristic(self, s1, s2):
+    def heuristic(self, cur):
+        """Since backward search, heuristic  defined wrt start.
+
+        Args:
+            state ([type]): [description]
+        """
         # TODO: Euclidean distance grossly underestimates true
         # cost for dynamically-constrained vehicles, should find
         # a better heuristic
-        z1 = self.graph.get_map_val(s1)
-        z2 = self.graph.get_map_val(s2)
-        x1, y1, _, _ = s1
-        x2, y2, _, _ = s2
-        return ((x2 - x1) ** 2 + (y2 - y1) ** 2 + (z2 - z1) ** 2) ** 0.5
+        cur_pos = np.array(
+            [self.get_x(state=cur),         # x
+             self.get_y(state=cur),         # y
+             self.graph.get_map_val(cur)])  # z
+        start_pos = np.array(
+            [self.get_x(state=self.start),         # x
+             self.get_y(state=self.start),         # y
+             self.graph.get_map_val(self.start)])  # z
+
+        dist = np.linalg.norm(start_pos - cur_pos)
+        return dist
 
     def found_start(self, state):
         """Basically like found-goal, but applied to backwards search. Still using goal threshold
@@ -716,32 +741,74 @@ class LatticeDstarLite(object):
         Args:
             state ([type]): [description]
         """
-        state = np.array(state)
-        is_similar_heading = abs(state[2] - self.start[2] < self.dstate[2])
-        return np.linalg.norm(state[:2] - self.start[:2]) < self.goal_thresh and is_similar_heading
+        # reaching goal requires similar position and heading
+        # TODO: also include velocity for a dynamics-considering version?
+        heading_dist = abs(
+            self.get_theta(state=state) - self.get_theta(state=self.start))
+        is_similar_heading = heading_dist < self.heading_thresh
 
-    def state_equal(self, n1, n2):
+        is_spatially_near = self.heuristic(state) < self.goal_thresh
+
+        return is_spatially_near and is_similar_heading
+
+    def state_equal(self, n1, n2, ignore_time=False):
         # let state_to_key handle issues of angle wraparound
         n1_key = self.state_to_key(n1)
         n2_key = self.state_to_key(n2)
-        return n1_key == n2_key
+        if ignore_time:
+            return n1_key[:-1] == n2_key[:-1]
+        else:
+            return n1_key == n2_key
 
-    def get_value(self, arr, node):
-        xi, yi, thetai, vi = self.state_to_key(node)
-        return arr[xi, yi, thetai, vi]
+    def get_value(self, val_map, state):
+        return val_map.get(self.state_to_key(state), self.INF)
 
-    def set_value(self, arr, node, val):
-        xi, yi, thetai, vi = self.state_to_key(node)
-        arr[xi, yi, thetai, vi] = val
+    def set_value(self, val_map, state, val):
+        val_map[self.state_to_key(state)] = val
 
     @ staticmethod
     def compute_f(g, h, eps):
         # just to be explicit
         return g + eps * h
 
+    @staticmethod
+    def get_x(state=None, index=False):
+        if index:
+            return 0
+        return state[0]
 
-def get_obs_window_bounds(graph, state, width, height):
-    xi, yi, _, _ = graph.discretize(state)
+    @staticmethod
+    def get_y(state=None, index=False):
+        if index:
+            return 1
+        return state[1]
+
+    @staticmethod
+    def get_theta(state=None, index=False):
+        if index:
+            return 2
+        return state[2]
+
+    @staticmethod
+    def get_vel(state=None, index=False):
+        if index:
+            return 3
+        return state[3]
+
+    @staticmethod
+    def get_time(state=None, index=False):
+        if index:
+            return 4
+        return state[4]
+
+    @staticmethod
+    def state_to_str(state):
+        return "(%.2f,%.2f,%.2f,%.2f, %.2f)" % (
+            state[0], state[1], state[2], state[3], state[4])
+
+
+def get_obs_window_bounds(graph: Graph, state, width, height):
+    xi, yi, _, _, _ = graph.discretize(state)
     half_width = int(width / 2)
     half_height = int(height / 2)
     xbounds = (max(0, xi - half_width),
@@ -784,18 +851,20 @@ def run_all_tests():
     dtheta = step / RAD_TO_DEG
 
     # collective variables for discretizing C-sapce
-    dstate = np.array([dx, dy, dtheta, dv])
-    min_state = np.array([minx, miny, min(thetas), min(velocities)])
+    dstate = np.array([dx, dy, dtheta, dv, dt])
+    min_state = np.array([minx, miny, min(thetas), min(velocities), 0])
 
     # arbitrary
-    start = [0, 0, 0, 0]
-    goal = [5, 5, 0, 0]
+    start = [0, 0, 0, 0, 0]  # time doesn't matter here
+    goal = [5, 5, 0, 0, 0]  # time doesn't matter here
+    cost_weights = [1, 1, 1]
     graph = Graph(map=map, min_state=min_state, dstate=dstate,
-                  thetas=thetas, velocities=velocities, wheel_radius=wheel_radius)
+                  thetas=thetas, velocities=velocities, wheel_radius=wheel_radius, cost_weights=cost_weights)
     planner = LatticeDstarLite(graph=graph, min_state=min_state, dstate=dstate,
-                               velocities=velocities, steer_angles=steer_angles, thetas=thetas, dt=dt, T=T)
+                               velocities=velocities, steer_angles=steer_angles, thetas=thetas, T=T)
 
-    max_state = np.array([maxx, maxy, thetas[-1], velocities[-1]])
+    # irrelevant for time
+    max_state = np.array([maxx, maxy, thetas[-1], velocities[-1], 0])
     test_state_equal(min_state=min_state, max_state=max_state, dstate=dstate,
                      thetas=thetas, velocities=velocities, planner=planner, graph=graph)
 
@@ -822,11 +891,12 @@ def test_state_equal(min_state, max_state, dstate, thetas,
             lower_s1) == graph.discretize(lower_s1))
 
     # make it explicit how rounding is done, very hard-coded
-    s1 = np.array([8, 8, 135 / RAD_TO_DEG, 2])
+    s1 = np.array([8, 8, 135 / RAD_TO_DEG, 2, 0])
     # with python 3, 0.5 rounds down to 0, so make tests work for both versions
-    upper_s1 = s1 + np.array([0.0499, 0.0499, 22.499 / RAD_TO_DEG, 0.499])
-    assert (planner.state_to_key(s1) == planner.state_to_key(upper_s1))
-    past_s1 = s1 + np.array([0.051, 0.051, 22.51 / RAD_TO_DEG, 0.51])
+    upper_s1 = s1 + \
+        np.array([0.0499, 0.0499, 22.499 / RAD_TO_DEG, 0.499, 0.0499])
+    assert (planner.state_equal(s1, upper_s1))
+    past_s1 = s1 + np.array([0.051, 0.051, 22.51 / RAD_TO_DEG, 0.51, 0.051])
     s1_key = np.array(planner.state_to_key(s1))
     try:
         past_s1_key = np.array(planner.state_to_key(past_s1))
@@ -835,9 +905,14 @@ def test_state_equal(min_state, max_state, dstate, thetas,
     except:
         pass
 
+    # show that time can be ignored for defining goal since unknown
+    s1[-1] = 95
+    assert (not planner.state_equal(s1, upper_s1))
+    assert (planner.state_equal(s1, upper_s1, ignore_time=True))
+
 
 def test_graph_update_map(graph: Graph, min_state, max_state):
-    dx, dy, _, _ = graph.dstate
+    dx, dy, _, _, _ = graph.dstate
     # single-value window at very edge of map should not cause error
     xbounds = [0, 1]
     ybounds = [0, 1]
@@ -865,13 +940,14 @@ def test_graph_traj_costing(graph: Graph, planner: LatticeDstarLite, max_state):
     # create obstacle in map
     dx = planner.dstate[0]
     obst_xi = 20
-    min_x, _, _, _ = planner.key_to_state(
-        [obst_xi, 0, planner.thetas[0], planner.velocities[0]])
+    min_x, _, _, _, _ = planner.key_to_state(
+        [obst_xi, 0, planner.thetas[0], planner.velocities[0], 0])
     graph.map[:, obst_xi:obst_xi + 5] = graph.wheel_radius + \
         1  # large jump along x = 5
 
-    state = [min_x - 10 * dx, 0, 0, max_state[-1]]  # facing obstacle at xi = 5
-    action = Action(steer=0, v=max_state[-1])
+    # facing obstacle at xi = 5
+    state = [min_x - 10 * dx, 0, 0, planner.get_vel(state=max_state), 0]
+    action = Action(steer=0, v=planner.get_vel(state=max_state))
     ai = planner.actions.index(action)
     traj = planner.car.rollout(
         state=state[:3], v=action.v, steer=action.steer, dt=planner.dt, T=planner.T)
@@ -887,7 +963,7 @@ def test_visualize_primitives(graph):
     plt.xlabel('x')
     plt.ylabel('y')
     # visualize successors and predecessors
-    state_discr = [graph.width / 2, graph.height / 2, 0, 1]
+    state_discr = [graph.width / 2, graph.height / 2, 0, 1, 0]
     state = graph.make_continuous(state_discr)
     for theta in graph.thetas:
         print("Theta: %d " % (theta * 180 / math.pi))
@@ -915,7 +991,7 @@ def test_visualize_primitives(graph):
 
 
 def simulate_plan_execution(start, goal, planner: LatticeDstarLite, true_map, viz=True):
-    dx, dy, _, _ = planner.dstate
+    dx, dy, _, _, _ = planner.dstate
     obs_width = 5
     obs_height = 5
 
@@ -936,7 +1012,7 @@ def simulate_plan_execution(start, goal, planner: LatticeDstarLite, true_map, vi
     axs1.set(xlabel='X', ylabel='Y')
 
     # run interleaved execution and planning
-    while not planner.state_equal(start, goal):
+    while not planner.state_equal(start, goal, ignore_time=True):
         # make observation around current state
         xbounds, ybounds = get_obs_window_bounds(
             graph=planner.graph, state=start, width=obs_width, height=obs_height)
@@ -980,7 +1056,11 @@ def main():
     wheel_radius = 0  # anything non-zero is an obstacle
 
     # define search params
-    eps = 4
+    eps = 1
+    dist_cost = 1
+    time_cost = 1
+    roughness_cost = 1
+    cost_weights = (dist_cost, time_cost, roughness_cost)
 
     # define action space
     velocities = np.linspace(start=1, stop=3, num=3)
@@ -997,22 +1077,23 @@ def main():
     dtheta = step / RAD_TO_DEG
 
     # collective variables for discretizing C-sapce
-    dstate = np.array([dx, dy, dtheta, dv])
-    min_state = np.array([minx, miny, min(thetas), min(velocities)])
+    dstate = np.array([dx, dy, dtheta, dv, dt])
+    min_state = np.array([minx, miny, min(thetas), min(velocities), 0])
 
     # create planner and graph
     graph = Graph(map=map, min_state=min_state, dstate=dstate,
-                  thetas=thetas, velocities=velocities, wheel_radius=wheel_radius)
+                  thetas=thetas, velocities=velocities, wheel_radius=wheel_radius, cost_weights=cost_weights)
     planner = LatticeDstarLite(graph=graph, min_state=min_state, dstate=dstate,
-                               velocities=velocities, steer_angles=steer_angles, thetas=thetas, dt=dt, T=T, eps=eps, viz=True)
+                               velocities=velocities, steer_angles=steer_angles, thetas=thetas, T=T, eps=eps, viz=True)
 
     # define start and  goal (x,y) need to be made continuous
     # since I selected those points on image map of discrete space
-    start = [50, 70, 0, min_state[-1]] * np.array([dx, dy, 1, 1])
+    start = [50, 70, 0, velocities[0], 0] * np.array([dx, dy, 1, 1, 1])
     # looks like goal should face up, but theta is chosen
     # in image-frame as is the y-coordinates, so -90 faces
     # upwards on our screen and +90 faces down
-    goal = [140, 20, -math.pi / 2, min_state[-1]] * np.array([dx, dy, 1, 1])
+    goal = [140, 20, -math.pi / 2, velocities[0], 0] * \
+        np.array([dx, dy, 1, 1, 1])
 
     # run planner
     simulate_plan_execution(start=start, goal=goal,
