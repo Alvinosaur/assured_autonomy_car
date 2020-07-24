@@ -38,6 +38,13 @@
             "console": "integratedTerminal"
         },
         {
+            "name": "lattice astar",
+            "type": "python",
+            "request": "launch",
+            "program": "/Users/Alvin/Documents/Code/safety_reachability_AV_research/assured_autonomy_car/search_planning_algos/lattice_astar.py",
+            "console": "integratedTerminal"
+        },
+        {
             "name": "dstar lite",
             "type": "python",
             "request": "launch",
