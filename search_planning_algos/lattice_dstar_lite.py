@@ -162,18 +162,17 @@ class LatticeDstarLite(object):
         self.successor = dict()
         self.successor[self.state_to_key(goal)] = None
         self.path = []
+        self.expand_order = []
         self.km = 0
         self.path_i = 0
 
     def compute_path_with_reuse(self):
-        expand_order = []
-
         # update whether start is inconsistent
         gstart = self.get_value(self.G, self.start)
         vstart = self.get_value(self.V, self.start)
         start_inconsistent = not np.isclose(gstart, vstart, atol=1e-5)
         if len(self.open_set) == 0:
-            return expand_order
+            return
 
         start_node = self.create_node(self.start)
         min_node = self.open_set[0]
@@ -192,7 +191,7 @@ class LatticeDstarLite(object):
                   (self.state_to_str(cur_state), cur_node.k1))
 
             # track order of states expanded
-            expand_order.append(cur_state)
+            self.expand_order.append(cur_state)
 
             # update current state's G value with V
             g_cur = self.get_value(self.G, cur_state)
@@ -220,11 +219,14 @@ class LatticeDstarLite(object):
                 cur_state, predecessor=True)
             for ti, traj in enumerate(all_trajs):
                 # iterate through trajectory and add states to open set
-                print()
-                print("Action: %s" % str(actions[ti]))
+                # print()
+                # print("Action: %s" % str(actions[ti]))
                 for si in range(traj.shape[0]):
                     next_state = traj[si, :]
-                    self.update_state(next_state)
+                    new_G = (dist_costs[ti][si] +
+                             self.get_value(self.G, cur_state))
+                    self.update_state(
+                        next_state, predecessor=cur_state, new_G=new_G)
 
                 if self.viz:
                     dx, dy, _, _, _ = self.dstate
@@ -250,7 +252,6 @@ class LatticeDstarLite(object):
         # add the leftover overconsistent states from incons
         # for anytime search
         # for v in incons: heapq.heappush(self.open_set, v)
-        return expand_order
 
     def remove_from_open(self, target_state):
         for i in range(len(self.open_set)):
@@ -294,7 +295,7 @@ class LatticeDstarLite(object):
 
         if need_update or self.path == []:
             # reverse start and goal so search backwards
-            expansions = self.compute_path_with_reuse()
+            self.compute_path_with_reuse()
             # print("Order of expansions:")
             # viz.draw_grid(self.graph, width=3, number=expansions, start=start,
             #               goal=self.goal)
@@ -358,8 +359,8 @@ class LatticeDstarLite(object):
         # backward search, so the heuristics always change, but can just add
         # constant
         k1 = self.compute_f(g=k2, h=h + self.km, eps=self.eps, )
-        print("%s: g(%.2f) + eps*h(%.2f) = (%.2f):" % (
-            self.state_to_str(cur), k2, k1 - k2, k1))
+        # print("%s: g(%.2f) + eps*h(%.2f) = (%.2f):" % (
+        #     self.state_to_str(cur), k2, k1 - k2, k1))
         return (k1, k2)
 
     def state_to_key(self, state):
@@ -390,17 +391,22 @@ class LatticeDstarLite(object):
     def key_to_state(self, key):
         return (np.array(key) * self.dstate) + self.min_state
 
-    def update_state(self, cur_state):
+    def update_state(self, cur_state, predecessor=None, new_G=None):
         # if already in openset, need to remove since has outdated f-val
         self.remove_from_open(cur_state)
 
         # get updated g-value of current state
-        if not self.state_equal(cur_state, self.goal, ignore_time=True):
-            min_g, best_successor = self.get_min_g_val(
-                cur_state)
-            self.set_value(self.V, cur_state, min_g)
-            self.successor[self.state_to_key(
-                cur_state)] = self.state_to_key(best_successor)
+        cur_key = self.state_to_key(cur_state)
+        if not self.state_equal(cur_state, self.goal):
+            if predecessor is not None:
+                assert(new_G is not None)
+                if self.get_value(self.V, cur_state) > new_G:
+                    self.set_value(self.V, cur_state, new_G)
+                    self.successor[cur_key] = self.state_to_key(predecessor)
+            else:
+                min_g, best_neighbor = self.get_min_g_val(cur_state)
+                self.set_value(self.V, cur_state, min_g)
+                self.successor[cur_key] = best_neighbor
 
         # if inconsistent, insert into open set
         v = self.get_value(self.V, cur_state)
@@ -455,14 +461,11 @@ class LatticeDstarLite(object):
         """
         # reaching goal requires similar position and heading
         # TODO: also include velocity for a dynamics-considering version?
-        heading_dist = abs(
-            self.get_theta(state=state) - self.get_theta(state=target)) % TWO_PI
-        is_similar_heading = heading_dist < self.heading_thresh
+        # heading_dist = abs(
+        #     self.get_theta(state=state) - self.get_theta(state=target)) % TWO_PI
+        # is_similar_heading = heading_dist < self.heading_thresh
 
         is_spatially_near = self.heuristic(state, target) < self.goal_thresh
-        print(self.heuristic(state, target), self.goal_thresh)
-        print(self.get_theta(state=state) * 180 /
-              math.pi, self.get_theta(state=target) * 180 / math.pi)
 
         return is_spatially_near  # and is_similar_heading
 

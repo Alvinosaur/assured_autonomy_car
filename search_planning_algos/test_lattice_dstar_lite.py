@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 
 from lattice_graph import Graph
 from lattice_dstar_lite import LatticeDstarLite
+from car_dynamics import Action
 
 RAD_TO_DEG = 180 / math.pi
 INCH_TO_M = 2.54 / 100.0
@@ -104,6 +105,11 @@ def test_state_equal(min_state, max_state, dstate, thetas,
 
 def test_graph_update_map(graph: Graph, min_state, max_state):
     dx, dy, _, _, _ = graph.dstate
+    # empty window should not cause error
+    xbounds = [0, 0]
+    ybounds = [0, 0]
+    graph.update_map(xbounds, ybounds, obs_window=[])
+
     # single-value window at very edge of map should not cause error
     xbounds = [0, 1]
     ybounds = [0, 1]
@@ -141,7 +147,7 @@ def test_graph_traj_costing(graph: Graph, planner: LatticeDstarLite, max_state):
     action = Action(steer=0, v=planner.get_vel(state=max_state))
     ai = planner.actions.index(action)
     traj = planner.car.rollout(
-        state=state[:3], v=action.v, steer=action.steer, dt=planner.dt, T=planner.T)
+        state=state[:3], action=action, dt=planner.dt, T=planner.T)
     costs, valid_traj = graph.calc_cost_and_validate_traj(
         state, traj, action=action, ai=ai)
     # trajectory should have been truncated since collides with obstacle
@@ -179,3 +185,7 @@ def test_visualize_primitives(graph):
         plt.pause(2)
         axs[0].clear()
         axs[1].clear()
+
+
+if __name__ == "__main__":
+    run_all_tests()

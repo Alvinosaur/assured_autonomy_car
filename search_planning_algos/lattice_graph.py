@@ -15,9 +15,7 @@ class Graph():
             base_prims_trajs ([type]): [description]
             viz (bool, optional): [description]. Defaults to False.
         """
-        self.map = map.astype(float)
-        assert(isinstance(map, np.ndarray))
-        self.height, self.width = map.shape  # y, x
+        self.set_new_map(map)
         self.dstate = dstate
         self.min_state = min_state
         self.thetas = thetas
@@ -26,6 +24,11 @@ class Graph():
 
         # very planner-specific
         self.dist_weight, self.time_weight, self.roughness_weight = cost_weights
+
+    def set_new_map(self, map):
+        assert(isinstance(map, np.ndarray))
+        self.map = map.astype(float)
+        self.height, self.width = map.shape  # y, x
 
     def generate_trajectories_and_costs(self, mprim_actions,
                                         base_trajs, state0):
@@ -136,8 +139,8 @@ class Graph():
         minxi, maxxi = xbounds
         minyi, maxyi = ybounds
 
-        assert (0 <= minxi and minxi < maxxi and maxxi < self.width)
-        assert (0 <= minyi and minyi < maxyi and maxyi < self.height)
+        assert (0 <= minxi and minxi <= maxxi and maxxi < self.width)
+        assert (0 <= minyi and minyi <= maxyi and maxyi < self.height)
 
         # 1 cm tolerance
         need_update = not np.allclose(
