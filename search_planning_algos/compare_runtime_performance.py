@@ -61,13 +61,13 @@ def create_identical_planners():
                         thetas=thetas, velocities=velocities, wheel_radius=wheel_radius, cost_weights=cost_weights)
     Dstar_planner = LatticeDstarLite(graph=Dstar_graph, min_state=min_state,
                                      dstate=dstate,
-                                     velocities=velocities, steer_angles=steer_angles, thetas=thetas, T=T, eps=eps, viz=True)
+                                     velocities=velocities, steer_angles=steer_angles, thetas=thetas, T=T, eps=eps, viz=False)
 
     Astar_graph = Graph(map=mock_map, min_state=min_state, dstate=dstate,
                         thetas=thetas, velocities=velocities, wheel_radius=wheel_radius, cost_weights=cost_weights)
     Astar_planner = LatticeAstar(graph=Astar_graph, min_state=min_state,
                                  dstate=dstate,
-                                 velocities=velocities, steer_angles=steer_angles, thetas=thetas, T=T, eps=eps, viz=True)
+                                 velocities=velocities, steer_angles=steer_angles, thetas=thetas, T=T, eps=eps, viz=False)
 
     return Dstar_planner, Astar_planner
 
@@ -105,6 +105,9 @@ def benchmark_plan_from_scratch(planner: t.Union[LatticeDstarLite, LatticeAstar]
 
 
 def binary_map_benchmarks():
+    # benchmark params
+    num_iters = 1
+
     # get planners
     Dstar_planner, Astar_planner = create_identical_planners()
     dx, dy, _, _, _ = Dstar_planner.dstate
@@ -123,16 +126,25 @@ def binary_map_benchmarks():
         np.array([dx, dy, 1, 1, 1])
 
     dstar_runtime, dstar_num_expansions = benchmark_plan_from_scratch(
-        Dstar_planner, goal, start, iters=1)
+        Dstar_planner, goal, start, iters=num_iters)
 
     astar_runtime, astar_num_expansions = benchmark_plan_from_scratch(
-        Astar_planner, start, goal, iters=1)
+        Astar_planner, start, goal, iters=num_iters)
 
     print("Dstar runtime, num expansions: %.2fs, %.2f" %
           (dstar_runtime, dstar_num_expansions))
 
     print("Astar runtime, num expansions: %.2fs, %.2f" %
           (astar_runtime, astar_num_expansions))
+
+    print("Dstar update_state_time: %.2f" %
+          (Dstar_planner.update_state_time / float(num_iters)))
+
+    print("Astar update_state_time: %.2f" %
+          (Astar_planner.update_state_time / float(num_iters)))
+
+    print("Dstar remove_from_open_time: %.2f" %
+          (Dstar_planner.remove_from_open_time / float(num_iters)))
 
 
 if __name__ == "__main__":

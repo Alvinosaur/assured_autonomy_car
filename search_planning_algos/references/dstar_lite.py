@@ -40,6 +40,7 @@ import visualizer as viz
 import numpy as np
 import sys
 import copy
+import time
 
 DEBUG = False
 
@@ -158,7 +159,10 @@ class DstarLite(object):
                 self.update_state(cur_state)  # Pred(s) U {s}
 
             for next in self.graph.neighbors(cur_state):
-                self.update_state(next)
+                trans_cost, _ = self.get_and_update_trans_cost(cur_state, next)
+                cost = (trans_cost + self.get_value(self.G, cur_state))
+                self.update_state(next, predecessor=cur_state, new_G=cost)
+                # self.update_state(next)
 
             # if reached start target state, update fstart value
             if self.state_equal(self.start, cur_state):
@@ -194,14 +198,17 @@ class DstarLite(object):
         self.start = start
         if not self.state_equal(self.goal, goal):
             self.set_new_goal(goal)
+
+        need_update = False
         for next in self.graph.neighbors(self.start):
             # get transition cost, which may or may not change depending on env
-            trans_cost, need_update = self.get_and_update_trans_cost(self.start, next,
-                                                                     observe_new_cost=True)
+            _, costs_changed = self.get_and_update_trans_cost(self.start, next,
+                                                              observe_new_cost=True)
+            need_update |= costs_changed
 
-            # if trans-cost has changed and start was predecessor of next
-            if need_update:
-                self.update_state(self.start)
+        # if trans-cost has changed and start was predecessor of next
+        if need_update:
+            self.update_state(self.start)
 
         # reverse start and goal so search backwards
         expansions = self.compute_path_with_reuse()
@@ -239,15 +246,21 @@ class DstarLite(object):
         k1 = self.compute_f(g=k2, h=h + self.km, eps=self.eps)
         return (k1, k2)
 
-    def update_state(self, cur_state):
+    def update_state(self, cur_state, predecessor=None, new_G=None):
         # if already in openset, need to remove since has outdated f-val
         self.remove_from_open(cur_state)
 
         # get updated g-value of current state
         if not self.state_equal(cur_state, self.goal):
-            min_g, best_neighbor = self.get_min_g_val(cur_state)
-            self.set_value(self.V, cur_state, min_g)
-            self.successor[cur_state] = best_neighbor
+            if predecessor is not None:
+                assert(new_G is not None)
+                if self.get_value(self.V, cur_state) > new_G:
+                    self.set_value(self.V, cur_state, new_G)
+                    self.successor[cur_state] = predecessor
+            else:
+                min_g, best_neighbor = self.get_min_g_val(cur_state)
+                self.set_value(self.V, cur_state, min_g)
+                self.successor[cur_state] = best_neighbor
 
         # if inconsistent, insert into open set
         v = self.get_value(self.V, cur_state)
@@ -381,4 +394,7 @@ def test():
 
 
 if __name__ == "__main__":
+    start_time = time.time()
     test()
+    end_time = time.time()
+    print("Time taken: %.2fs" % (end_time - start_time))

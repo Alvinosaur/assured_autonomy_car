@@ -4,6 +4,7 @@ import sys
 import copy
 import math
 import matplotlib.pyplot as plt
+import time
 
 from car_dynamics import Action, Car
 from lattice_graph import Graph
@@ -90,6 +91,7 @@ class LatticeDstarLite(object):
     MAX_THETA = 2 * math.pi
 
     def __init__(self, graph: Graph, min_state, dstate, velocities, steer_angles, thetas, T, goal_thresh=None, eps=1.0, viz=False):
+        self.update_state_time = 0
         self.min_state = min_state
         self.dstate = dstate
         self.velocities = velocities
@@ -128,13 +130,19 @@ class LatticeDstarLite(object):
         # populated during call to self.search()
         self.successor = dict()
         self.path = []
-        self.open_set = []
+        self.open = []
+        self.open_set = set()
         self.start = self.goal = None
+        self.start_key = self.goal_key = None
         self.path_i = 0
 
         # G and V values explained in dstar_lite.py
         self.G = dict()
         self.V = dict()
+
+        # benchmark debugging
+        self.update_state_time = 0
+        self.remove_from_open_time = 0
 
     def precompute_all_primitives(self):
         # not a fully-defined state, but used as origin
@@ -153,40 +161,104 @@ class LatticeDstarLite(object):
         self.graph.generate_trajectories_and_costs(
             mprim_actions=self.actions, base_trajs=self.base_trajs, state0=state0)
 
+    def set_new_start(self, start):
+        self.shifted_start = False  # reset
+        self.start_key = self.state_to_key(start)
+        assert (self.is_valid_key(self.start_key))
+        if self.start is not None:
+            self.km += self.heuristic(cur=self.start, target=start)
+        self.start = start
+
     def set_new_goal(self, goal):
         self.goal = goal
+        self.goal_key = self.state_to_key(goal)
+        assert(self.is_valid_key(self.goal_key))
+
         self.V = dict()
         self.G = dict()
-        self.set_value(self.V, goal, 0)
-        self.open_set = [self.create_node(goal)]
+        self.set_value(val_map=self.V, state_key=self.goal_key, val=0)
+
+        # unsorted set version of "open" which is actually a heap, but is termed "open" by convention
+        self.open = [self.create_node(goal)]
+        self.open_set = {self.goal_key}
+
         self.successor = dict()
-        self.successor[self.state_to_key(goal)] = None
+        self.successor[self.goal_key] = None
         self.path = []
         self.expand_order = []
         self.km = 0
         self.path_i = 0
 
+    def clean_up_open_(self):
+        """lazy removal policy where open_set the true depiction
+        of which states are in open set
+        This function cleans up self.open to match states in open_set. This 
+        is implemented as such to allow for O(1) state-lookup while still
+        taking advantage of heaps for min-cost state expansion
+        """
+        found_stale = True
+        while found_stale and len(self.open) > 0:
+            min_node = self.open[0]
+            if self.state_to_key(min_node.state) not in self.open_set:
+                heapq.heappop(self.open)
+            else:
+                found_stale = False
+
+    def add_to_open(self, node: LatticeNode):
+        state_key = self.state_to_key(node.state)
+        heapq.heappush(self.open, node)
+        self.open_set.add(state_key)
+
+    def pop_from_open(self):
+        self.clean_up_open_()
+        try:
+            cur_node = heapq.heappop(self.open)
+            cur_key = self.state_to_key(cur_node.state)
+            self.open_set.remove(cur_key)
+            return cur_node, cur_key
+        except IndexError:
+            print("Trying to pop from empty open!")
+            return None, None
+
+    def peek_min_open(self):
+        self.clean_up_open_()
+        if len(self.open) > 0:
+            return self.open[0]
+        else:
+            print("Empty open, cannot peek!")
+            return None
+
+    def remove_from_open(self, state_key):
+        """Removes a state(with specified key) if it lies in open_set.
+        Does NOT remove from self.open and leaves this to other helper functions
+        so self.open and self.open_set will not be identical all the time.
+
+        Args:
+            state_key ([type]): [description]
+        """
+        if state_key in self.open_set:
+            self.open_set.remove(state_key)
+
     def compute_path_with_reuse(self):
         # update whether start is inconsistent
-        gstart = self.get_value(self.G, self.start)
-        vstart = self.get_value(self.V, self.start)
+        gstart = self.get_value(self.G, state_key=self.start_key)
+        vstart = self.get_value(self.V, state_key=self.start_key)
         start_inconsistent = not np.isclose(gstart, vstart, atol=1e-5)
+
         if len(self.open_set) == 0:
             return
-
         start_node = self.create_node(self.start)
-        min_node = self.open_set[0]
+        min_node = self.peek_min_open()
 
         while len(self.open_set) > 0 and (
                 (min_node < start_node) or start_inconsistent):
             # print("(Fstart, Fmin): (%s, %s)" % (start_node, min_node))
             # expand next node w/ lowest f-cost, add to closed
-            # print(self.open_set)
-            cur_node = heapq.heappop(self.open_set)
-            # print("   Expanded %d : %s: %s" % (expand_i, str(cur_node),
-            #                                    str(list(self.graph.neighbors(cur_node.state)))))
-            # print("Current: %s" % cur_node)
+            # print(self.open)
+
+            cur_node, cur_key = self.pop_from_open()
             cur_state = cur_node.state
+
             print("Expanded: %s, f=%.2f" %
                   (self.state_to_str(cur_state), cur_node.k1))
 
@@ -194,13 +266,14 @@ class LatticeDstarLite(object):
             self.expand_order.append(cur_state)
 
             # update current state's G value with V
-            g_cur = self.get_value(self.G, cur_state)
-            v_cur = self.get_value(self.V, cur_state)
-            if g_cur > v_cur:
-                # g_cur = v_cur
-                self.set_value(self.G, cur_state, v_cur)
+            cur_G = self.get_value(self.G, state_key=cur_key)
+            cur_V = self.get_value(self.V, state_key=cur_key)
+            if cur_G > cur_V:
+                cur_G = cur_V
+                self.set_value(self.G, state_key=cur_key, val=cur_G)
             else:
-                self.set_value(self.G, cur_state, self.INF)
+                cur_G = self.INF
+                self.set_value(self.G, state_key=cur_key, val=cur_G)
                 self.update_state(cur_state)  # Pred(s) U {s}
 
             # if reached start target state, update fstart value
@@ -208,11 +281,10 @@ class LatticeDstarLite(object):
             if self.reached_target(cur_state, self.start):
                 # time of course won't be the same
                 if not self.state_equal(self.start, cur_state, ignore_time=True):
-                    self.km += self.heuristic(cur_state, target=self.start)
-                    self.start = cur_state
+                    self.set_new_start(cur_state)
+                    self.shifted_start = True
                     start_node = self.create_node(self.start)
                     # return entire path, not just path[1:]
-                    self.shifted_start = True
 
             # get neighbor states update their values if necessary
             all_trajs, dist_costs, actions = self.graph.neighbors(
@@ -223,10 +295,9 @@ class LatticeDstarLite(object):
                 # print("Action: %s" % str(actions[ti]))
                 for si in range(traj.shape[0]):
                     next_state = traj[si, :]
-                    new_G = (dist_costs[ti][si] +
-                             self.get_value(self.G, cur_state))
+                    new_G = (dist_costs[ti][si] + cur_G)
                     self.update_state(
-                        next_state, predecessor=cur_state, new_G=new_G)
+                        next_state, predecessor_key=cur_key, new_G=new_G)
 
                 if self.viz:
                     dx, dy, _, _, _ = self.dstate
@@ -241,35 +312,20 @@ class LatticeDstarLite(object):
             # TODO: if reached start target state, update fstart value? Original dstar_lite doesn't do anything meaningful here
 
             # update whether start is inconsistent
-            gstart = self.get_value(self.G, self.start)
-            vstart = self.get_value(self.V, self.start)
+            gstart = self.get_value(self.G, state_key=self.start_key)
+            vstart = self.get_value(self.V, state_key=self.start_key)
             start_inconsistent = not np.isclose(gstart, vstart, atol=1e-5)
 
             # update fmin value
-            if len(self.open_set) > 0:
-                min_node = self.open_set[0]
+            min_node = self.peek_min_open()
 
         # add the leftover overconsistent states from incons
         # for anytime search
-        # for v in incons: heapq.heappush(self.open_set, v)
-
-    def remove_from_open(self, target_state):
-        for i in range(len(self.open_set)):
-            node = self.open_set[i]
-            if self.state_equal(node.state, target_state):
-                # set node to remove as last element, remove duplicate, reorder
-                self.open_set[i] = self.open_set[-1]
-                self.open_set.pop()
-                heapq.heapify(self.open_set)
-                return
+        # for v in incons: heapq.heappush(self.open, v)
 
     def search(self, start, goal, obs_window, window_bounds):
-        self.shifted_start = False  # reset
-        assert (self.is_valid_key(self.state_to_key(start)))
-        assert(self.is_valid_key(self.state_to_key(goal)))
-        if self.start is not None:
-            self.km += self.heuristic(cur=self.start, target=start)
-        self.start = start
+        self.set_new_start(start)
+
         # time irrelevant for goal so ignore
         if self.goal is None or not self.state_equal(self.goal, goal, ignore_time=True):
             self.set_new_goal(goal)
@@ -287,7 +343,7 @@ class LatticeDstarLite(object):
             self.ax.clear()
             self.ax.imshow(self.graph.map)
 
-        if need_update and len(self.open_set) > 0:
+        if need_update and len(self.open) > 0:
             # point of dstar lite is to not update every state in open-set
             # but only those that are relevant, so  only update start and let this propagate
             self.path_i = 0
@@ -338,7 +394,7 @@ class LatticeDstarLite(object):
                 assert(np.isclose(self.get_vel(
                     state=next_state), self.actions[ti].v))
                 cost = (trans_cost[ti][si] +
-                        self.get_value(self.G, next_state))
+                        self.get_value(self.G, state=next_state))
                 if cost < min_g or best_neighbor is None:
                     min_g = cost
                     best_neighbor = next_state
@@ -350,8 +406,8 @@ class LatticeDstarLite(object):
         return LatticeNode(k1, k2, cur)
 
     def get_k(self, cur, target):
-        v = self.get_value(self.V, cur)
-        g = self.get_value(self.G, cur)
+        v = self.get_value(self.V, state=cur)
+        g = self.get_value(self.G, state=cur)
         k2 = min(v, g)
         # k1 = f-value
         h = self.heuristic(cur, target)
@@ -391,28 +447,32 @@ class LatticeDstarLite(object):
     def key_to_state(self, key):
         return (np.array(key) * self.dstate) + self.min_state
 
-    def update_state(self, cur_state, predecessor=None, new_G=None):
+    def update_state(self, cur_state, predecessor_key=None, new_G=None):
+        start_time = time.time()
         # if already in openset, need to remove since has outdated f-val
-        self.remove_from_open(cur_state)
+        cur_key = self.state_to_key(cur_state)
+        self.remove_from_open(cur_key)
 
         # get updated g-value of current state
-        cur_key = self.state_to_key(cur_state)
         if not self.state_equal(cur_state, self.goal):
-            if predecessor is not None:
+            if predecessor_key is not None:
                 assert(new_G is not None)
-                if self.get_value(self.V, cur_state) > new_G:
-                    self.set_value(self.V, cur_state, new_G)
-                    self.successor[cur_key] = self.state_to_key(predecessor)
+                if self.get_value(self.V, state_key=cur_key) > new_G:
+                    self.set_value(self.V, state_key=cur_key, val=new_G)
+                    self.successor[cur_key] = predecessor_key
             else:
                 min_g, best_neighbor = self.get_min_g_val(cur_state)
-                self.set_value(self.V, cur_state, min_g)
+                self.set_value(self.V, state_key=cur_key, val=min_g)
                 self.successor[cur_key] = best_neighbor
 
         # if inconsistent, insert into open set
-        v = self.get_value(self.V, cur_state)
-        g = self.get_value(self.G, cur_state)
+        v = self.get_value(self.V, state_key=cur_key)
+        g = self.get_value(self.G, state_key=cur_key)
         if not np.isclose(v, g, atol=1e-5):
-            heapq.heappush(self.open_set, self.create_node(cur_state))
+            self.add_to_open(self.create_node(cur_state))
+
+        end_time = time.time()
+        self.update_state_time += (end_time - start_time)
 
     def reconstruct_path(self):
         """Returns a path ordered from start to goal. If found state close to,
@@ -421,13 +481,12 @@ class LatticeDstarLite(object):
         Returns:
             [type]: [description]
         """
-        cur_key = self.state_to_key(self.start)
-        goal_key = self.state_to_key(self.goal)
+        cur_key = self.start_key
         path = []
         if self.shifted_start:
             # add start if this start isn't exactly original start
             path.append(self.start)
-        while cur_key != goal_key:
+        while cur_key != self.goal_key:
             cur_key = self.successor[cur_key]
             path.append(self.key_to_state(cur_key))
         return path
@@ -478,11 +537,20 @@ class LatticeDstarLite(object):
         else:
             return n1_key == n2_key
 
-    def get_value(self, val_map, state):
-        return val_map.get(self.state_to_key(state), self.INF)
+    def get_value(self, val_map, *, state=None, state_key=None):
+        assert(state is not None or state_key is not None)
+        if state_key is not None:
+            # default infinity if never seen
+            return val_map.get(state_key, self.INF)
+        else:
+            return val_map.get(self.state_to_key(state), self.INF)
 
-    def set_value(self, val_map, state, val):
-        val_map[self.state_to_key(state)] = val
+    def set_value(self, val_map, val, *, state=None, state_key=None):
+        assert (state is not None or state_key is not None)
+        if state_key is not None:
+            val_map[state_key] = val
+        else:
+            val_map[self.state_to_key(state)] = val
 
     @ staticmethod
     def compute_f(g, h, eps):

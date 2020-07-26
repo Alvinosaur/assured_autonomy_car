@@ -3,6 +3,7 @@ import math
 import heapq
 import matplotlib.pyplot as plt
 import copy
+import time
 
 from car_dynamics import Action, Car
 from lattice_graph import Graph
@@ -25,7 +26,7 @@ class Node(object):
         return self.priority < other.priority
 
 
-class BasicLattice(LatticeDstarLite):
+class LatticeAstar(LatticeDstarLite):
     # state = [x, y, theta]
     def __init__(self, graph: Graph, min_state, dstate, velocities, steer_angles, thetas, T, goal_thresh=None, eps=1.0, viz=False):
         super().__init__(graph=graph, min_state=min_state,
@@ -39,25 +40,26 @@ class BasicLattice(LatticeDstarLite):
         self.goal = goal
         start_key = self.state_to_key(start)
         self.G = {start_key: 0}  # start has travel cost of 0
-        self.open_set = [self.create_node(state=start, priority=0)]
+        self.open_set = [self.create_node(state=start)]
         self.successor = {start_key: None}  # start has no successors
         self.path = []
+        self.expand_order = []
         self.path_actions = []
         self.path_timesteps = []
         self.path_i = 0
 
-    def create_node(self, state, priority):
+    def create_node(self, state, priority=0):
         return Node(priority=priority, state=state)
 
     def search(self, start, goal, obs_window, window_bounds):
         assert (self.is_valid_key(self.state_to_key(start)))
         assert(self.is_valid_key(self.state_to_key(goal)))
         # time irrelevant for goal so ignore
-        if self.goal is None or not self.state_equal(self.goal, goal, ignore_time=True):
-            self.reset(start, goal)
+        need_update = self.goal is None or not self.state_equal(
+            self.goal, goal, ignore_time=True)
 
         # update map if specified
-        need_update = self.graph.update_map(
+        need_update |= self.graph.update_map(
             obs_window=obs_window, xbounds=window_bounds[0], ybounds=window_bounds[1])
 
         if self.viz:
@@ -65,6 +67,7 @@ class BasicLattice(LatticeDstarLite):
             self.ax.imshow(self.graph.map)
 
         if need_update or len(self.path) == 0:
+            self.reset(start, goal)
             success = self.compute_path()
             if success:
                 return self.path, self.path_actions, self.path_timesteps
@@ -77,16 +80,15 @@ class BasicLattice(LatticeDstarLite):
             return self.path[self.path_i:], self.path_actions[self.path_i:], self.path_timesteps[self.path_i:]
 
     def compute_path(self):
-        expansion_order = []
         reached_goal = False
 
         while len(self.open_set) > 0:
             node = heapq.heappop(self.open_set)
             cur_state = node.state
             print("Expanded: %.2f, %.2f" % (cur_state[0], cur_state[1]))
-            print()
+            # print()
             current_key = self.state_to_key(cur_state)
-            expansion_order.append(current_key)
+            self.expand_order.append(current_key)
             if self.reached_target(cur_state, self.goal):
                 self.goal = cur_state
                 reached_goal = True
@@ -99,8 +101,8 @@ class BasicLattice(LatticeDstarLite):
             # add neighbors to open set
             for ti, traj in enumerate(all_trajs):
                 # iterate through trajectory and add states to open set
-                print()
-                print("Action: %s" % str(actions[ti]))
+                # print()
+                # print("Action: %s" % str(actions[ti]))
                 for si in range(traj.shape[0]):
                     next_state = traj[si, :]
                     self.update_state(cur_state=cur_state,
@@ -129,6 +131,7 @@ class BasicLattice(LatticeDstarLite):
             return False
 
     def update_state(self, cur_state, next_state, trans_cost, action, t):
+        start_time = time.time()
         current_key = self.state_to_key(cur_state)
         next_key = self.state_to_key(next_state)
         new_G = self.G[current_key] + trans_cost
@@ -143,6 +146,9 @@ class BasicLattice(LatticeDstarLite):
                 priority=priority, state=next_state))
             # si + 1 since 0th sample in trajectory is not current state
             self.successor[next_key] = (cur_state, action, t)
+
+        end_time = time.time()
+        self.update_state_time += (end_time - start_time)
 
     def reconstruct_path(self):
         states, actions, action_durs = [], [], []
@@ -211,10 +217,8 @@ def simulate_plan_execution(start, goal, planner, true_map, viz=True):
         obs_window = true_map[ybounds[0]:ybounds[1],
                               xbounds[0]: xbounds[1]]
 
-        res = planner.search(
+        path, actions, timesteps = planner.search(
             start=start, goal=goal, obs_window=obs_window, window_bounds=(xbounds, ybounds))
-        print(res)
-        path, actions, timesteps = res
 
         # visualize stuff
         if viz:
@@ -277,7 +281,7 @@ def main():
     # create planner and graph
     graph = Graph(map=map, min_state=min_state, dstate=dstate,
                   thetas=thetas, velocities=velocities, wheel_radius=wheel_radius, cost_weights=cost_weights)
-    planner = BasicLattice(graph=graph, min_state=min_state, dstate=dstate,
+    planner = LatticeAstar(graph=graph, min_state=min_state, dstate=dstate,
                            velocities=velocities, steer_angles=steer_angles, thetas=thetas, T=T, eps=eps, viz=True)
 
     # define start and  goal (x,y) need to be made continuous
