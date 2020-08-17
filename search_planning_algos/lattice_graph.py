@@ -180,9 +180,9 @@ class Graph():
         # along traj, if one state becomes invalid, all other successors
         # also are invalid
         now_invalid = False
-        prev_state = np.copy(traj[0, :])
-        for i in range(self.N):
-            current = np.copy(traj[i, :])
+        for i in range(self.N - 1):
+            prev_state = np.copy(traj[i, :])
+            current = np.copy(traj[i + 1, :])
             # if collide  with obstacle or move out-of-bounds, truncate and return
             if (not self.is_valid_state(current) or
                     self.is_collision(prev_state, current)):
@@ -219,11 +219,37 @@ class Graph():
                 0 <= vi < len(self.velocities) and
                 0 <= ti)
 
-    def is_collision(self, prev, next):
-        prev_z = self.get_map_val(prev)
-        cur_z = self.get_map_val(next)
+    def is_collision(self, prev, next, num_steps=5):
+        """Linearly interpolates between states and checks states that lie on path. Simply checks if change in z-value between any two states is greater than wheel radius. More advanced techniques can be used, considering heading and speed for safety checks.
+
+        Args:
+            prev ([type]): [description]
+            next (function): [description]
+
+        Returns:
+            [type]: [description]
+        """
+        print(self.get_map_val(prev), self.get_map_val(next))
+        (x0, y0) = self.get_x(prev), self.get_y(prev)
+        (x1, y1) = self.get_x(next), self.get_y(next)
+        interp = np.linspace(start=[x0, y0], stop=[x1, y1], num=num_steps)
+
+        prev_interp = np.copy(prev)
+        next_interp = np.copy(prev)
+        for i in range(num_steps - 1):
+            prev_x, prev_y = interp[i, :]
+            next_x, next_y = interp[i + 1, :]
+            prev_interp[:2] = [prev_x, prev_y]
+            next_interp[:2] = [next_x, next_y]
+
+            prev_z = self.get_map_val(prev_interp)
+            cur_z = self.get_map_val(next_interp)
+
+            if abs(cur_z - prev_z) > self.wheel_radius:
+                return True
+
         # TODO Make car wheel a parameter passed in
-        return abs(cur_z - prev_z) > self.wheel_radius
+        return False
 
     def get_map_val(self, state):
         assert(self.is_valid_state(state))

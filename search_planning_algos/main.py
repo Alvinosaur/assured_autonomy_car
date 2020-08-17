@@ -97,7 +97,7 @@ def main():
     T = 1.0
     velocities = np.linspace(start=1, stop=2, num=2) / dt
     dv = velocities[1] - velocities[0]
-    steer_angles = np.linspace(-math.pi / 32, math.pi / 32, num=3)
+    steer_angles = np.linspace(-math.pi / 32, math.pi / 32, num=5)
 
     # define heading space
     start, stop, step = 0, 315, 45
