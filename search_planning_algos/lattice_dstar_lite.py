@@ -167,10 +167,10 @@ class LatticeDstarLite(object):
         assert (self.is_valid_key(self.start_key))
         if self.start is not None:
             self.km += self.heuristic(cur=self.start, target=start)
-        self.start = start
+        self.start = np.copy(start)
 
     def set_new_goal(self, goal):
-        self.goal = goal
+        self.goal = np.copy(goal)
         self.goal_key = self.state_to_key(goal)
         assert(self.is_valid_key(self.goal_key))
 
@@ -258,9 +258,8 @@ class LatticeDstarLite(object):
 
             cur_node, cur_key = self.pop_from_open()
             cur_state = cur_node.state
-
-            print("Expanded: %s, f=%.2f" %
-                  (self.state_to_str(cur_state), cur_node.k1))
+            # print("Expanded: %s, f=%.2f" %
+            #       (self.state_to_str(cur_state), cur_node.k1))
 
             # track order of states expanded
             self.expand_order.append(cur_state)
@@ -453,12 +452,16 @@ class LatticeDstarLite(object):
         cur_key = self.state_to_key(cur_state)
         self.remove_from_open(cur_key)
 
-        # get updated g-value of current state
-        if not self.state_equal(cur_state, self.goal):
+        # get updated v, g-value of current state
+        cur_V = self.get_value(self.V, state_key=cur_key)
+        cur_G = self.get_value(self.G, state_key=cur_key)
+
+        # using direct comparison for increased performace
+        if cur_key != self.goal_key:
             if predecessor_key is not None:
-                assert(new_G is not None)
-                if self.get_value(self.V, state_key=cur_key) > new_G:
-                    self.set_value(self.V, state_key=cur_key, val=new_G)
+                if cur_V > new_G:
+                    cur_V = new_G
+                    self.set_value(self.V, state_key=cur_key, val=cur_V)
                     self.successor[cur_key] = predecessor_key
             else:
                 min_g, best_neighbor = self.get_min_g_val(cur_state)
@@ -466,9 +469,8 @@ class LatticeDstarLite(object):
                 self.successor[cur_key] = best_neighbor
 
         # if inconsistent, insert into open set
-        v = self.get_value(self.V, state_key=cur_key)
-        g = self.get_value(self.G, state_key=cur_key)
-        if not np.isclose(v, g, atol=1e-5):
+
+        if not np.isclose(cur_V, cur_G, atol=1e-5):
             self.add_to_open(self.create_node(cur_state))
 
         end_time = time.time()
@@ -539,11 +541,14 @@ class LatticeDstarLite(object):
 
     def get_value(self, val_map, *, state=None, state_key=None):
         assert(state is not None or state_key is not None)
-        if state_key is not None:
-            # default infinity if never seen
-            return val_map.get(state_key, self.INF)
+        if state_key is None:
+            state_key = self.state_to_key(state)
+
+        if state_key in val_map:
+            return val_map[state_key]
         else:
-            return val_map.get(self.state_to_key(state), self.INF)
+            # default cost infinity if never seen
+            return self.INF
 
     def set_value(self, val_map, val, *, state=None, state_key=None):
         assert (state is not None or state_key is not None)

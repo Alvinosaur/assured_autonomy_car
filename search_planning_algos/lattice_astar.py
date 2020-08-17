@@ -70,14 +70,15 @@ class LatticeAstar(LatticeDstarLite):
             self.reset(start, goal)
             success = self.compute_path()
             if success:
-                return self.path, self.path_actions, self.path_timesteps
+                return self.path  # , self.path_actions, self.path_timesteps
             else:
                 print("Failed to find a solution!")
                 return None
 
         else:
             self.path_i += 1
-            return self.path[self.path_i:], self.path_actions[self.path_i:], self.path_timesteps[self.path_i:]
+            return self.path[self.path_i:]
+            # , self.path_actions[self.path_i:], self.path_timesteps[self.path_i:]
 
     def compute_path(self):
         reached_goal = False
@@ -85,7 +86,7 @@ class LatticeAstar(LatticeDstarLite):
         while len(self.open_set) > 0:
             node = heapq.heappop(self.open_set)
             cur_state = node.state
-            print("Expanded: %.2f, %.2f" % (cur_state[0], cur_state[1]))
+            # print("Expanded: %.2f, %.2f" % (cur_state[0], cur_state[1]))
             # print()
             current_key = self.state_to_key(cur_state)
             self.expand_order.append(current_key)

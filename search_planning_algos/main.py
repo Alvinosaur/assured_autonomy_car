@@ -42,7 +42,7 @@ def simulate_plan_execution(start, goal, planner: LatticeDstarLite, true_map, vi
     axs1.set(xlabel='X', ylabel='Y')
 
     # run interleaved execution and planning
-    while not planner.state_equal(start, goal, ignore_time=True):
+    while not planner.reached_target(start, goal):
         # make observation around current state
         xbounds, ybounds = get_obs_window_bounds(
             graph=planner.graph, state=start, width=obs_width, height=obs_height)

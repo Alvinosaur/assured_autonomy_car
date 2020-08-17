@@ -3,6 +3,9 @@ import math
 import matplotlib.pyplot as plt
 import time
 import typing as t
+import queue
+from threading import Thread
+from copy import deepcopy
 
 from lattice_graph import Graph
 from lattice_dstar_lite import LatticeDstarLite
@@ -67,7 +70,7 @@ def create_identical_planners():
                         thetas=thetas, velocities=velocities, wheel_radius=wheel_radius, cost_weights=cost_weights)
     Astar_planner = LatticeAstar(graph=Astar_graph, min_state=min_state,
                                  dstate=dstate,
-                                 velocities=velocities, steer_angles=steer_angles, thetas=thetas, T=T, eps=eps, viz=False)
+                                 velocities=velocities, steer_angles=steer_angles, thetas=thetas, T=T, eps=eps, viz=True)
 
     return Dstar_planner, Astar_planner
 
@@ -104,9 +107,70 @@ def benchmark_plan_from_scratch(planner: t.Union[LatticeDstarLite, LatticeAstar]
     return total_time / float(iters), total_states_expanded / float(iters)
 
 
-def binary_map_benchmarks():
+def replan_execute(planner, args):
+    (start, goal, true_map, obs_width, obs_height) = args
+    start_time = time.time()
+
+    # reset so doesn't just reuse original plan
+    planner.set_new_start(start)
+    planner.set_new_goal(goal)
+    current = np.copy(start)
+
+    # run interleaved execution and planning
+    while not planner.reached_target(current, goal):
+        # make observation around current state
+        xbounds, ybounds = get_obs_window_bounds(
+            graph=planner.graph, state=start, width=obs_width, height=obs_height)
+        obs_window = true_map[ybounds[0]:ybounds[1],
+                              xbounds[0]: xbounds[1]]
+
+        path = planner.search(
+            start=current, goal=goal, obs_window=obs_window, window_bounds=(xbounds, ybounds))
+
+        current = path[0]
+
+    end_time = time.time()
+    total_states_expanded = len(planner.expand_order)
+    return (end_time - start_time, total_states_expanded)
+
+
+def benchmark_replan(planner: t.Union[LatticeDstarLite, LatticeAstar],
+                     start, goal, true_map, iters=1):
+    assert (iters > 0)
+    obs_width = 5
+    obs_height = 5
+
+    que = queue.Queue()
+    threads_list = []
+    total_runtime = 0
+    total_num_states_expanded = 0
+
+    args = (start, goal, true_map, obs_width, obs_height)
+    replan_execute(planner, args)
+    # for i in range(iters):
+    #     t = Thread(target=lambda q, planner_arg, args: q.put(
+    #         replan_execute(planner_arg, args)), args=(que, deepcopy(planner), args))
+    #     t.start()
+    #     threads_list.append(t)
+
+    # # Join all the threads
+    # for t in threads_list:
+    #     t.join()
+
+    # # Check thread's return value
+    # while not que.empty():
+    #     runtime, num_states_expanded = que.get()
+    #     total_runtime += runtime
+    #     total_num_states_expanded += num_states_expanded
+
+    avg_runtime = total_runtime / float(iters)
+    avg_num_states_expanded = total_num_states_expanded / float(iters)
+    return avg_runtime, avg_num_states_expanded
+
+
+def binary_known_map():
     # benchmark params
-    num_iters = 1
+    num_iters = 50
 
     # get planners
     Dstar_planner, Astar_planner = create_identical_planners()
@@ -147,5 +211,50 @@ def binary_map_benchmarks():
           (Dstar_planner.remove_from_open_time / float(num_iters)))
 
 
+def binary_unknown_map():
+    # benchmark params
+    num_iters = 50
+
+    # get planners
+    Dstar_planner, Astar_planner = create_identical_planners()
+    dx, dy, _, _, _ = Dstar_planner.dstate
+    velocities = Dstar_planner.velocities
+
+    # Map 1 tests
+    map_file = "search_planning_algos/maps/map3.npy"
+    true_map = np.load(map_file)
+    prior_map = np.zeros_like(true_map)
+    # NOTE: make sure to copy map since will be destructively modified during planning and execution loop
+    Dstar_planner.graph.set_new_map(prior_map)
+    Astar_planner.graph.set_new_map(prior_map)
+
+    # Map 1 test 1
+    start = [50, 70, 0, velocities[0], 0] * np.array([dx, dy, 1, 1, 1])
+    goal = [140, 20, -math.pi / 2, velocities[0], 0] * \
+        np.array([dx, dy, 1, 1, 1])
+
+    dstar_runtime, dstar_num_expansions = benchmark_replan(
+        Dstar_planner, goal, start, true_map, iters=num_iters)
+
+    astar_runtime, astar_num_expansions = benchmark_replan(
+        Astar_planner, start, goal, true_map, iters=num_iters)
+
+    print("Dstar runtime, num expansions: %.2fs, %.2f" %
+          (dstar_runtime, dstar_num_expansions))
+
+    print("Astar runtime, num expansions: %.2fs, %.2f" %
+          (astar_runtime, astar_num_expansions))
+
+    print("Dstar update_state_time: %.2f" %
+          (Dstar_planner.update_state_time / float(num_iters)))
+
+    print("Astar update_state_time: %.2f" %
+          (Astar_planner.update_state_time / float(num_iters)))
+
+    print("Dstar remove_from_open_time: %.2f" %
+          (Dstar_planner.remove_from_open_time / float(num_iters)))
+
+
 if __name__ == "__main__":
-    binary_map_benchmarks()
+    # binary_known_map()
+    binary_unknown_map()
