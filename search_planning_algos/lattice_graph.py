@@ -172,6 +172,13 @@ class Graph():
             [self.get_x(state=orig),   # x
              self.get_y(state=orig),   # y
              self.get_map_val(orig)])  # z
+
+        # check if current state to first state in trajectory is infeasible
+        first_state = np.copy(traj[0, :])
+        if (not self.is_valid_state(orig) or
+                self.is_collision(orig, first_state)):
+            return per_sample_cost[0:0], traj[0:0, :]
+
         dist = 0
 
         # used to measure transition time taken
@@ -179,7 +186,6 @@ class Graph():
 
         # along traj, if one state becomes invalid, all other successors
         # also are invalid
-        now_invalid = False
         for i in range(self.N - 1):
             prev_state = np.copy(traj[i, :])
             current = np.copy(traj[i + 1, :])
