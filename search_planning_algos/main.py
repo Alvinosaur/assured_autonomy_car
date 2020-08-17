@@ -79,7 +79,7 @@ def main():
     map_file = "search_planning_algos/maps/map3.npy"
     map = np.load(map_file)
     Y, X = map.shape
-    dy, dx = 0.1, 0.1
+    dy, dx = 1.0, 1.0
     miny, minx = 0, 0
 
     # define car
@@ -93,11 +93,11 @@ def main():
     cost_weights = (dist_cost, time_cost, roughness_cost)
 
     # define action space
-    velocities = np.linspace(start=1, stop=2, num=2)
-    dv = velocities[1] - velocities[0]
     dt = 0.1
     T = 1.0
-    steer_angles = np.linspace(-math.pi / 4, math.pi / 4, num=3)
+    velocities = np.linspace(start=1, stop=2, num=2) / dt
+    dv = velocities[1] - velocities[0]
+    steer_angles = np.linspace(-math.pi / 32, math.pi / 32, num=3)
 
     # define heading space
     start, stop, step = 0, 315, 45
@@ -118,12 +118,13 @@ def main():
 
     # define start and  goal (x,y) need to be made continuous
     # since I selected those points on image map of discrete space
-    start = [50, 70, 0, velocities[0], 0] * np.array([dx, dy, 1, 1, 1])
+    start = (np.array([50, 70, 0, velocities[0], 0]) *
+             np.array([dx, dy, 1, 1, 1]))
     # looks like goal should face up, but theta is chosen
     # in image-frame as is the y-coordinates, so -90 faces
     # upwards on our screen and +90 faces down
-    goal = [140, 20, -math.pi / 2, velocities[0], 0] * \
-        np.array([dx, dy, 1, 1, 1])
+    goal = (np.array([140, 20, -math.pi / 2, velocities[0], 0]) *
+            np.array([dx, dy, 1, 1, 1]))
 
     # run planner
     simulate_plan_execution(start=start, goal=goal,

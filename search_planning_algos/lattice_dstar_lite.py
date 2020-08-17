@@ -302,6 +302,12 @@ class LatticeDstarLite(object):
                     dx, dy, _, _, _ = self.dstate
                     x_data = traj[:, 0] / dx
                     y_data = traj[:, 1] / dy
+                    print("Action: %s" % str(actions[ti]))
+                    print(x_data)
+                    print("Y:")
+                    print(y_data)
+                    print("Theta:")
+                    print(traj[:, 2] * 180 / math.pi)
                     self.ax.scatter(x_data, y_data, s=2)
                     plt.draw()
 
@@ -506,10 +512,11 @@ class LatticeDstarLite(object):
             [self.get_x(state=cur),         # x
              self.get_y(state=cur),         # y
              self.graph.get_map_val(cur)])  # z
+
         start_pos = np.array(
             [self.get_x(state=target),         # x
              self.get_y(state=target),         # y
-             self.graph.get_map_val(self.start)])  # z
+             self.graph.get_map_val(target)])  # z
 
         dist = np.linalg.norm(start_pos - cur_pos)
         return dist

@@ -33,7 +33,7 @@ def create_identical_planners():
     wheel_radius = 0  # anything in map with non-zero z-value is an obstacle
 
     # define search params
-    eps = 4
+    eps = 2
     dist_cost = 1
     time_cost = 1
     roughness_cost = 1
@@ -42,7 +42,7 @@ def create_identical_planners():
     # define action space
     velocities = np.linspace(start=1, stop=2, num=2)
     dv = velocities[1] - velocities[0]
-    dt = 0.1
+    dt = 1
     T = 1.0
     steer_angles = np.linspace(-math.pi / 4, math.pi / 4, num=3)
 
@@ -64,7 +64,7 @@ def create_identical_planners():
                         thetas=thetas, velocities=velocities, wheel_radius=wheel_radius, cost_weights=cost_weights)
     Dstar_planner = LatticeDstarLite(graph=Dstar_graph, min_state=min_state,
                                      dstate=dstate,
-                                     velocities=velocities, steer_angles=steer_angles, thetas=thetas, T=T, eps=eps, viz=False)
+                                     velocities=velocities, steer_angles=steer_angles, thetas=thetas, T=T, eps=eps, viz=True)
 
     Astar_graph = Graph(map=mock_map, min_state=min_state, dstate=dstate,
                         thetas=thetas, velocities=velocities, wheel_radius=wheel_radius, cost_weights=cost_weights)
@@ -108,8 +108,9 @@ def benchmark_plan_from_scratch(planner: t.Union[LatticeDstarLite, LatticeAstar]
 
 
 def replan_execute(planner, args):
-    (start, goal, true_map, obs_width, obs_height) = args
+    (start, goal, true_map, obs_width, obs_height, reverse) = args
     start_time = time.time()
+    print(obs_width, obs_height)
 
     # reset so doesn't just reuse original plan
     planner.set_new_start(start)
@@ -118,11 +119,17 @@ def replan_execute(planner, args):
 
     # run interleaved execution and planning
     while not planner.reached_target(current, goal):
+        print("Moved to: %s" % planner.state_to_str(current))
         # make observation around current state
-        xbounds, ybounds = get_obs_window_bounds(
-            graph=planner.graph, state=start, width=obs_width, height=obs_height)
+        if reverse:
+            xbounds, ybounds = get_obs_window_bounds(
+                graph=planner.graph, state=goal, width=obs_width, height=obs_height)
+        else:
+            xbounds, ybounds = get_obs_window_bounds(
+                graph=planner.graph, state=start, width=obs_width, height=obs_height)
         obs_window = true_map[ybounds[0]:ybounds[1],
                               xbounds[0]: xbounds[1]]
+        print(obs_window)
 
         path = planner.search(
             start=current, goal=goal, obs_window=obs_window, window_bounds=(xbounds, ybounds))
@@ -135,7 +142,7 @@ def replan_execute(planner, args):
 
 
 def benchmark_replan(planner: t.Union[LatticeDstarLite, LatticeAstar],
-                     start, goal, true_map, iters=1):
+                     start, goal, true_map, iters=1, reverse=False):
     assert (iters > 0)
     obs_width = 5
     obs_height = 5
@@ -145,7 +152,7 @@ def benchmark_replan(planner: t.Union[LatticeDstarLite, LatticeAstar],
     total_runtime = 0
     total_num_states_expanded = 0
 
-    args = (start, goal, true_map, obs_width, obs_height)
+    args = (start, goal, true_map, obs_width, obs_height, reverse)
     replan_execute(planner, args)
     # for i in range(iters):
     #     t = Thread(target=lambda q, planner_arg, args: q.put(
@@ -225,19 +232,20 @@ def binary_unknown_map():
     true_map = np.load(map_file)
     prior_map = np.zeros_like(true_map)
     # NOTE: make sure to copy map since will be destructively modified during planning and execution loop
-    Dstar_planner.graph.set_new_map(prior_map)
-    Astar_planner.graph.set_new_map(prior_map)
+    Dstar_planner.graph.set_new_map(true_map)
+    Astar_planner.graph.set_new_map(true_map)
 
     # Map 1 test 1
     start = [50, 70, 0, velocities[0], 0] * np.array([dx, dy, 1, 1, 1])
-    goal = [140, 20, -math.pi / 2, velocities[0], 0] * \
+    goal = [80, 40, -math.pi / 2, velocities[0], 0] * \
         np.array([dx, dy, 1, 1, 1])
 
+    # NOTE: Dstar lite plans backwards so to compare to Astar correctly, wwe pass in start=goal and goal=start
     dstar_runtime, dstar_num_expansions = benchmark_replan(
-        Dstar_planner, goal, start, true_map, iters=num_iters)
+        planner=Dstar_planner, start=goal, goal=start, true_map=true_map, iters=num_iters, reverse=True)
 
     astar_runtime, astar_num_expansions = benchmark_replan(
-        Astar_planner, start, goal, true_map, iters=num_iters)
+        planner=Astar_planner, start=start, goal=goal, true_map=true_map, iters=num_iters)
 
     print("Dstar runtime, num expansions: %.2fs, %.2f" %
           (dstar_runtime, dstar_num_expansions))
