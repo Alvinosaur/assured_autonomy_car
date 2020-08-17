@@ -235,7 +235,6 @@ class Graph():
         Returns:
             [type]: [description]
         """
-        print(self.get_map_val(prev), self.get_map_val(next))
         (x0, y0) = self.get_x(prev), self.get_y(prev)
         (x1, y1) = self.get_x(next), self.get_y(next)
         interp = np.linspace(start=[x0, y0], stop=[x1, y1], num=num_steps)

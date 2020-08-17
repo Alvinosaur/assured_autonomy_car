@@ -136,7 +136,7 @@ class LatticeAstar(LatticeDstarLite):
         current_key = self.state_to_key(cur_state)
         next_key = self.state_to_key(next_state)
         new_G = self.G[current_key] + trans_cost
-        if next_key not in self.G or new_G < self.G[next_key]:
+        if (next_key not in self.G or new_G < self.G[next_key]) and (not self.is_duplicate(next_state)):
             self.G[next_key] = new_G
 
             # f = g + eps*h
@@ -145,6 +145,7 @@ class LatticeAstar(LatticeDstarLite):
 
             heapq.heappush(self.open_set, self.create_node(
                 priority=priority, state=next_state))
+            self.kdtree.add(next_state[:2])
             # si + 1 since 0th sample in trajectory is not current state
             self.successor[next_key] = (cur_state, action, t)
 

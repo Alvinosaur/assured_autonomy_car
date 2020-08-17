@@ -5,6 +5,7 @@ import copy
 import math
 import matplotlib.pyplot as plt
 import time
+import kdtree
 
 from car_dynamics import Action, Car
 from lattice_graph import Graph
@@ -124,6 +125,11 @@ class LatticeDstarLite(object):
         self.shifted_start = False
         self.eps = eps
 
+        # find nearest neighbors by position
+        self.kdtree = kdtree.create(dimensions=2)
+        self.dist_thresh = 2 * (self.dstate[0]**2 + self.dstate[1]**2)
+        self.neighbor_count_thresh = 3
+
         # values that can change if new goal is set
         self.km = 0  # changing start position and thus changing heuristic
 
@@ -192,7 +198,7 @@ class LatticeDstarLite(object):
     def clean_up_open_(self):
         """lazy removal policy where open_set the true depiction
         of which states are in open set
-        This function cleans up self.open to match states in open_set. This 
+        This function cleans up self.open to match states in open_set. This
         is implemented as such to allow for O(1) state-lookup while still
         taking advantage of heaps for min-cost state expansion
         """
@@ -238,6 +244,9 @@ class LatticeDstarLite(object):
         """
         if state_key in self.open_set:
             self.open_set.remove(state_key)
+
+    def add_to_kdtree(self, state):
+        self.kdtree.add(state[:2])
 
     def compute_path_with_reuse(self):
         # update whether start is inconsistent
@@ -302,12 +311,6 @@ class LatticeDstarLite(object):
                     dx, dy, _, _, _ = self.dstate
                     x_data = traj[:, 0] / dx
                     y_data = traj[:, 1] / dy
-                    print("Action: %s" % str(actions[ti]))
-                    print(x_data)
-                    print("Y:")
-                    print(y_data)
-                    print("Theta:")
-                    print(traj[:, 2] * 180 / math.pi)
                     self.ax.scatter(x_data, y_data, s=2)
                     plt.draw()
 
@@ -376,7 +379,7 @@ class LatticeDstarLite(object):
     def get_min_g_val(self, cur):
         """Find best "successor"(predecessor in search process) from current state. Since we are doing backward search, all "successor" states are actually predecessors in the search process (ie: they were expanded before this current state in temporal order). In this case, when looking for neighbor states, these states' time values need to be subtracted in sequene rather than added.
 
-        neighbors: (start) 5 <- 4 <- 3 <- 2, 1 <- 0 (goal) 
+        neighbors: (start) 5 <- 4 <- 3 <- 2, 1 <- 0 (goal)
         original neighbors: (start) 4 -> 5 -> 6 -> 7 -> 8 (goal)
             NOTE: notice above timesteps for start's "successors" are wrong wrt search process but correct in actual execution
 
@@ -452,6 +455,12 @@ class LatticeDstarLite(object):
     def key_to_state(self, key):
         return (np.array(key) * self.dstate) + self.min_state
 
+    def is_duplicate(self, state):
+        nn = self.kdtree.search_nn_dist(
+            point=state[:2], distance=self.dist_thresh)
+        # kdtree.visualize(self.kdtree)
+        return len(nn) >= self.neighbor_count_thresh
+
     def update_state(self, cur_state, predecessor_key=None, new_G=None):
         start_time = time.time()
         # if already in openset, need to remove since has outdated f-val
@@ -476,8 +485,10 @@ class LatticeDstarLite(object):
 
         # if inconsistent, insert into open set
 
-        if not np.isclose(cur_V, cur_G, atol=1e-5):
+        if not np.isclose(cur_V, cur_G, atol=1e-5) and (
+                not self.is_duplicate(cur_state)):
             self.add_to_open(self.create_node(cur_state))
+            self.add_to_kdtree(cur_state)
 
         end_time = time.time()
         self.update_state_time += (end_time - start_time)
@@ -569,37 +580,37 @@ class LatticeDstarLite(object):
         # just to be explicit
         return g + eps * h
 
-    @staticmethod
+    @ staticmethod
     def get_x(state=None, index=False):
         if index:
             return 0
         return state[0]
 
-    @staticmethod
+    @ staticmethod
     def get_y(state=None, index=False):
         if index:
             return 1
         return state[1]
 
-    @staticmethod
+    @ staticmethod
     def get_theta(state=None, index=False):
         if index:
             return 2
         return state[2]
 
-    @staticmethod
+    @ staticmethod
     def get_vel(state=None, index=False):
         if index:
             return 3
         return state[3]
 
-    @staticmethod
+    @ staticmethod
     def get_time(state=None, index=False):
         if index:
             return 4
         return state[4]
 
-    @staticmethod
+    @ staticmethod
     def state_to_str(state):
         return "(%.2f,%.2f,%.2f,%.2f, %.2f)" % (
             state[0], state[1], state[2], state[3], state[4])

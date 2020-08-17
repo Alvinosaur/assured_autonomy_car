@@ -26,25 +26,25 @@ def get_obs_window_bounds(graph: Graph, state, width, height):
 
 
 def create_identical_planners():
-    dy, dx = 0.1, 0.1
+    dy, dx = 1.0, 1.0
     miny, minx = 0, 0
 
     # define car
     wheel_radius = 0  # anything in map with non-zero z-value is an obstacle
 
     # define search params
-    eps = 2
+    eps = 2.0
     dist_cost = 1
     time_cost = 1
     roughness_cost = 1
     cost_weights = (dist_cost, time_cost, roughness_cost)
 
     # define action space
-    velocities = np.linspace(start=1, stop=2, num=2)
-    dv = velocities[1] - velocities[0]
-    dt = 1
+    dt = 0.1
     T = 1.0
-    steer_angles = np.linspace(-math.pi / 4, math.pi / 4, num=3)
+    velocities = np.linspace(start=1, stop=2, num=2) / dt
+    dv = velocities[1] - velocities[0]
+    steer_angles = np.linspace(-math.pi / 32, math.pi / 32, num=3)
 
     # define heading space
     start, stop, step = 0, 315, 45
@@ -232,11 +232,11 @@ def binary_unknown_map():
     true_map = np.load(map_file)
     prior_map = np.zeros_like(true_map)
     # NOTE: make sure to copy map since will be destructively modified during planning and execution loop
-    Dstar_planner.graph.set_new_map(true_map)
-    Astar_planner.graph.set_new_map(true_map)
+    Dstar_planner.graph.set_new_map(prior_map)
+    Astar_planner.graph.set_new_map(prior_map)
 
     # Map 1 test 1
-    start = [50, 70, 0, velocities[0], 0] * np.array([dx, dy, 1, 1, 1])
+    start = [85, 65, 0, velocities[0], 0] * np.array([dx, dy, 1, 1, 1])
     goal = [80, 40, -math.pi / 2, velocities[0], 0] * \
         np.array([dx, dy, 1, 1, 1])
 
