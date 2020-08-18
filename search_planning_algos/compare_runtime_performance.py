@@ -92,7 +92,7 @@ def benchmark_plan_from_scratch(planner: t.Union[LatticeDstarLite, LatticeAstar]
     total_states_expanded = 0
     for i in range(iters):
         start_time = time.time()
-        res = planner.search(start=start, goal=goal,
+        res, _ = planner.search(start=start, goal=goal,
                              obs_window=obs_window, window_bounds=window_bounds)
         end_time = time.time()
         print("Found solution!")
@@ -131,7 +131,7 @@ def replan_execute(planner, args):
                               xbounds[0]: xbounds[1]]
         print(obs_window)
 
-        path = planner.search(
+        path, policy = planner.search(
             start=current, goal=goal, obs_window=obs_window, window_bounds=(xbounds, ybounds))
 
         current = path[0]

@@ -110,7 +110,7 @@ class LatticeAstar(LatticeDstarLite):
                                       next_state=next_state,
                                       trans_cost=dist_costs[ti][si],
                                       action=actions[ti],
-                                      t=si)
+                                      t=si * self.dt)
 
                     if self.viz:
                         dx, dy, _, _, _ = self.dstate
@@ -152,21 +152,40 @@ class LatticeAstar(LatticeDstarLite):
         end_time = time.time()
         self.update_state_time += (end_time - start_time)
 
-    def reconstruct_path(self):
-        states, actions, action_durs = [], [], []
+    def reconstruct_path(self, full=False):
+        """Indentical to LatticeDstarLite version except constructs backwards from goal to start since search was conducted forwards.
+
+        Args:
+            full (bool, optional): [description]. Defaults to False.
+
+        Returns:
+            [type]: [description]
+        """
+        path = []
+        policy = []
         start_key = self.state_to_key(self.start)
         cur_key = self.state_to_key(self.goal)
         while cur_key != start_key:
-            prev, action, sample_i = self.successor[cur_key]
-            states.append(prev)
-            actions.append(action)
-            action_durs.append(sample_i * self.dt)
+            prev, action, t = self.successor[cur_key]
+            # prev --> cur in temporally so that's the start of rollout
+            prev_state = self.state_to_key(prev)
+            if full:
+                rollout = self.car.rollout(
+                    state=prev_state, action=action, dt=self.dt, T=t, t0=0)
+                N = int(t / self.dt)
+                print("Rollout  generating for N= %d" % N)
+                for i in range(N):
+                    path.append(rollout[i, :])
+                    policy.append((action, self.dt))
+            else:
+                path.append(prev)
+                policy.append((action, t))
+
             cur_key = self.state_to_key(prev)
 
-        states.reverse()
-        actions.reverse()
-        action_durs.reverse()
-        return states, actions, action_durs
+        path.reverse()
+        policy.reverse()
+        return path, policy
 
 
 def viz_map_overlay_plan(actions, trajectories, dstate):

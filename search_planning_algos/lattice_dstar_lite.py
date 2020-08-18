@@ -91,7 +91,7 @@ class LatticeDstarLite(object):
     INF = 1e10
     MAX_THETA = 2 * math.pi
 
-    def __init__(self, graph: Graph, min_state, dstate, velocities, steer_angles, thetas, T, goal_thresh=None, eps=1.0, viz=False):
+    def __init__(self, graph: Graph, min_state, dstate, velocities, steer_angles, thetas, T, goal_thresh=None, eps=1.0, viz=True):
         self.update_state_time = 0
         self.min_state = min_state
         self.dstate = dstate
@@ -136,6 +136,7 @@ class LatticeDstarLite(object):
         # populated during call to self.search()
         self.successor = dict()
         self.path = []
+        self.policy = []
         self.open = []
         self.open_set = set()
         self.start = self.goal = None
@@ -191,6 +192,7 @@ class LatticeDstarLite(object):
         self.successor = dict()
         self.successor[self.goal_key] = None
         self.path = []
+        self.policy = []
         self.expand_order = []
         self.km = 0
         self.path_i = 0
@@ -305,7 +307,7 @@ class LatticeDstarLite(object):
                     next_state = traj[si, :]
                     new_G = (dist_costs[ti][si] + cur_G)
                     self.update_state(
-                        next_state, predecessor_key=cur_key, new_G=new_G)
+                        next_state, predecessor_key=cur_key, new_G=new_G, action=actions[ti], t=si * self.dt)
 
                 if self.viz:
                     dx, dy, _, _, _ = self.dstate
@@ -363,11 +365,11 @@ class LatticeDstarLite(object):
             # print("Order of expansions:")
             # viz.draw_grid(self.graph, width=3, number=expansions, start=start,
             #               goal=self.goal)
-            self.path = self.reconstruct_path()
-            return self.path
+            self.path, self.policy = self.reconstruct_path(full=True)
+            return self.path, self.policy
         else:
             self.path_i += 1
-            return self.path[self.path_i:]
+            return self.path[self.path_i:], self.policy[self.path_i:]
 
     def update_closest_to_start(self, cur_state):
         # TODO: Currently unused
@@ -392,7 +394,7 @@ class LatticeDstarLite(object):
             [type]: [description]
         """
         min_g = self.INF
-        best_neighbor = None
+        best_neighbor_info = None
         all_trajs, trans_cost, actions = self.graph.neighbors(
             cur, backwards=True)
         for ti, traj in enumerate(all_trajs):
@@ -403,11 +405,12 @@ class LatticeDstarLite(object):
                     state=next_state), self.actions[ti].v))
                 cost = (trans_cost[ti][si] +
                         self.get_value(self.G, state=next_state))
-                if cost < min_g or best_neighbor is None:
+                if cost < min_g or best_neighbor_info is None:
                     min_g = cost
-                    best_neighbor = next_state
+                    best_neighbor_info = (
+                        next_state, actions[ti], si * self.dt)
 
-        return min_g, best_neighbor
+        return min_g, best_neighbor_info
 
     def create_node(self, cur):
         k1, k2 = self.get_k(cur, target=self.start)
@@ -461,7 +464,7 @@ class LatticeDstarLite(object):
         # kdtree.visualize(self.kdtree)
         return len(nn) >= self.neighbor_count_thresh
 
-    def update_state(self, cur_state, predecessor_key=None, new_G=None):
+    def update_state(self, cur_state, action=None, t=None, predecessor_key=None, new_G=None):
         start_time = time.time()
         # if already in openset, need to remove since has outdated f-val
         cur_key = self.state_to_key(cur_state)
@@ -477,11 +480,11 @@ class LatticeDstarLite(object):
                 if cur_V > new_G:
                     cur_V = new_G
                     self.set_value(self.V, state_key=cur_key, val=cur_V)
-                    self.successor[cur_key] = predecessor_key
+                    self.successor[cur_key] = (predecessor_key, action, t)
             else:
-                min_g, best_neighbor = self.get_min_g_val(cur_state)
+                min_g, best_neighbor_info = self.get_min_g_val(cur_state)
                 self.set_value(self.V, state_key=cur_key, val=min_g)
-                self.successor[cur_key] = best_neighbor
+                self.successor[cur_key] = best_neighbor_info
 
         # if inconsistent, insert into open set
 
@@ -493,22 +496,43 @@ class LatticeDstarLite(object):
         end_time = time.time()
         self.update_state_time += (end_time - start_time)
 
-    def reconstruct_path(self):
-        """Returns a path ordered from start to goal. If found state close to,
-        but not exactly the start state, then shifted start is at path[0]. Otherwise, start is not part of path and path[0] is next state. Goal is at path[-1].
+    def reconstruct_path(self, full=False):
+        """Generates full state path and policy (actions and their durations)
+        after solving for motion plan. By default, returns the exact state path found, which can skip over intermediary states.
+
+        Args:
+            full (bool, optional): This skipping behavior
+        can be avoided by specifying full=True, which will have every state along path returned and action durations all of value dt. To return full path, we use car controller to generate all the intermediary steps. Defaults to False.
 
         Returns:
-            [type]: [description]
+            tuple(state path, policy): 
         """
         cur_key = self.start_key
         path = []
+        policy = []
         if self.shifted_start:
             # add start if this start isn't exactly original start
             path.append(self.start)
+
         while cur_key != self.goal_key:
-            cur_key = self.successor[cur_key]
-            path.append(self.key_to_state(cur_key))
-        return path
+            (next_key, action, t) = self.successor[cur_key]
+            cur_state = self.key_to_state(cur_key)
+            next_state = self.key_to_state(next_key)
+            if full:
+                rollout = self.car.rollout(
+                    state=cur_state, action=action, dt=self.dt, T=t, t0=0)
+                N = int(t / self.dt)
+                print("Rollout  generating for N= %d" % N)
+                for i in range(N):
+                    path.append(rollout[i, :])
+                    policy.append((action, self.dt))
+
+            else:
+                path.append(self.key_to_state(cur_key))
+                policy.append((action, t))
+
+            cur_key = next_key
+        return path, policy
 
     def heuristic(self, cur, target):
         """Since backward search, heuristic  defined wrt start.

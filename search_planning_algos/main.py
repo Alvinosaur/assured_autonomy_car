@@ -49,7 +49,7 @@ def simulate_plan_execution(start, goal, planner: LatticeDstarLite, true_map, vi
         obs_window = true_map[ybounds[0]:ybounds[1],
                               xbounds[0]: xbounds[1]]
 
-        path = planner.search(
+        path, policy = planner.search(
             start=start, goal=goal, obs_window=obs_window, window_bounds=(xbounds, ybounds))
 
         total_states_expanded = len(planner.expand_order)
@@ -117,11 +117,11 @@ def main():
     graph = Graph(map=map, min_state=min_state, dstate=dstate,
                   thetas=thetas, velocities=velocities, wheel_radius=wheel_radius, cost_weights=cost_weights)
     planner = LatticeDstarLite(graph=graph, min_state=min_state, dstate=dstate,
-                               velocities=velocities, steer_angles=steer_angles, thetas=thetas, T=T, eps=eps, viz=False)
+                               velocities=velocities, steer_angles=steer_angles, thetas=thetas, T=T, eps=eps, viz=True)
 
     # define start and  goal (x,y) need to be made continuous
     # since I selected those points on image map of discrete space
-    start = (np.array([80, 40, 0, velocities[0], 0]) *
+    start = (np.array([60, 40, 0, velocities[0], 0]) *
              np.array([dx, dy, 1, 1, 1]))
     # looks like goal should face up, but theta is chosen
     # in image-frame as is the y-coordinates, so -90 faces
