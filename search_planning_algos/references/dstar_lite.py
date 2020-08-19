@@ -148,6 +148,12 @@ class DstarLite(object):
             cur_state = cur_node.state
             # closed.add(current)
 
+            # if this old inserted state has outdated heuristic value (start moved), then reinsert with new updated value
+            updated_node = self.create_node(cur_state)
+            if cur_node < updated_node:
+                heapq.heappush(self.open_set, updated_node)
+                continue
+
             # visualize expansion process
             expansions[cur_state] = i
             i += 1
@@ -165,7 +171,10 @@ class DstarLite(object):
             for next in self.graph.neighbors(cur_state):
                 trans_cost, _ = self.get_and_update_trans_cost(cur_state, next)
                 cost = (trans_cost + self.get_value(self.G, cur_state))
-                self.update_state(next, predecessor=cur_state, new_G=cost)
+                if self.get_value(self.G, cur_state) == self.INF:
+                    self.update_state(next, new_G=cost)
+                else:
+                    self.update_state(next, predecessor=cur_state, new_G=cost)
                 # self.update_state(next)
 
             # if reached start target state, update fstart value
@@ -227,7 +236,7 @@ class DstarLite(object):
         best_neighbor = None
         for next in self.graph.neighbors(cur):
             trans_cost, _ = self.get_and_update_trans_cost(cur, next)
-            cost = (trans_cost + self.get_value(self.G, next))
+            cost = (trans_cost + self.get_value(self.V, next))
             if cost < min_g or best_neighbor is None:
                 min_g = cost
                 best_neighbor = next
@@ -367,8 +376,8 @@ class DstarLite(object):
 
 
 def test():
-    start = (3, 0)
-    goal = (6, 6)  # (x, y)
+    start = (0, 14)
+    goal = (14, 6)  # (x, y)
     width = 3
     four_connected = False
     # In diagram_simple test, you will notice robot constantly attempt to move
@@ -379,8 +388,8 @@ def test():
     # viz.diagram_simple.four_connected = four_connected
     # planner = self(viz.diagram_simple, start, goal, four_connected)
 
-    viz.diagram2.four_connected = four_connected
-    planner = DstarLite(viz.diagram2, four_connected)
+    viz.diagram1.four_connected = four_connected
+    planner = DstarLite(viz.diagram1, four_connected)
     while not planner.state_equal(start, goal):
         next = planner.search(start, goal)
 
@@ -389,7 +398,10 @@ def test():
         viz.draw_grid(planner.graph, width,
                       path=planner.path, start=start, goal=goal)
 
-        start = next
+        if next == (3, 1):
+            start = (1, 0)
+        else:
+            start = next
         print("New Start: %s" % str(start))
     # viz.draw_grid(viz.diagram4, width, number=cost_so_far, start=start, goal=goal)
     # print()
@@ -402,3 +414,8 @@ if __name__ == "__main__":
     test()
     end_time = time.time()
     print("Time taken: %.2fs" % (end_time - start_time))
+
+"""
+viz.draw_grid(self.graph, width=3,
+              number=self.G, start=start, goal=goal, use_np_arr=True)
+"""
