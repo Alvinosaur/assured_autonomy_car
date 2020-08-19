@@ -18,6 +18,8 @@ class Action():
 class Car():
     """Different from basic car by also tracking velocity in state
 
+    Bicycle Model Source: https://www.coursera.org/lecture/intro-self-driving-cars/lesson-2-the-kinematic-bicycle-model-Bi8yE
+
     Args:
         object ([type]): [description]
     """

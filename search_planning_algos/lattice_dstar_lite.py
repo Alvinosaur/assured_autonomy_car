@@ -6,6 +6,8 @@ import math
 import matplotlib.pyplot as plt
 import time
 import kdtree
+import dubins
+from astarlib import astarlib
 
 from car_dynamics import Action, Car
 from lattice_graph import Graph
@@ -29,8 +31,14 @@ Confusions:
 
 3. When we observe new terrain around robot, how to figure out which paths lie in this region? Can't just check which start/end nodes lie in region because a trajectory may cross over this region but start and stop outside it... Need an  efficient way to query all connections crossing over a given position (which will include multiple states w/ different thetas and velocities).
 
+NOTE: It looks like goal should face up, but theta is chosen in image-frame as is the y-coordinates, so -90 faces upwards on our screen and +90 faces down...
+If we choose goal with theta = +90, the first set of expansions we see seem to all face upwards, but actually +90 corresponds  to facing  down. The reason they "look like" they're all facing up is that we're visualizing  predecessors of the goal state, or all the possible trajectories that could lead directly to the goal.
+
 Differences from original dstar-lite:
 - for original, I could use the same "get-neighbors" function to get both predecessors and successors. Here, however, predecessors != sucessors since theta(heading) controls which direction car is moving. We account for this by simply flipping the current heading by 180 degrees and running rollout generation to get predecessors. NOTE: Especially for 3D terrain, moving forwards and backwards over the same path is not the same (ex: fall over cliff v.s climb wall). But temporarily, this approach works with our cost functions and heuristic. If we want predecessor of current state facing forwards, need to flip theta by 180deg so state faces backwards. The our rollouts face backwards, but their orientations are now wrong (since also facing backwards when they should face forwards), so need to flip all their orientations back.
+
+- Since non-holonomic constraint of ackermann steering, we use a different heuristic:
+-  Euclidean distance underestimates path costs by violating kinematic constraints of robots. This misleads the search and leads to local minima where robot gets to the desired location, but not with the desired heading.
 
 For testing with a map generated from image and picking points using matplotlib GUI, (x,y) is valid, but our orientation is wrong. Moving up screen is -90, moving down is +90deg.
 
@@ -91,13 +99,16 @@ class LatticeDstarLite(object):
     INF = 1e10
     MAX_THETA = 2 * math.pi
 
-    def __init__(self, graph: Graph, min_state, dstate, velocities, steer_angles, thetas, T, goal_thresh=None, eps=1.0, viz=True):
+    def __init__(self, graph: Graph, car: Car, min_state, dstate, velocities, steer_angles, thetas, T, goal_thresh=None, eps=1.0, viz=True, reconstruct_full=True):
         self.update_state_time = 0
         self.min_state = min_state
         self.dstate = dstate
         self.velocities = velocities
         self.thetas = thetas
         self.steer_angles = steer_angles
+        self.car = car
+        self.min_turn_rad = car.L / math.tan(car.max_steer)
+        self.reconstruct_full = reconstruct_full
         self.viz = viz
         if viz:
             f = plt.figure()
@@ -108,6 +119,7 @@ class LatticeDstarLite(object):
 
         # define action space
         self.graph = graph
+        self.obstacle_heuristic = astarlib.aStar(self.graph.obstacle_map)
         self.actions = [Action(v=v, steer=steer)
                         for steer in steer_angles for v in velocities]
         self.dt = self.get_time(state=dstate)
@@ -116,7 +128,7 @@ class LatticeDstarLite(object):
         self.precompute_all_primitives()
 
         if goal_thresh is None:
-            self.goal_thresh = np.linalg.norm(self.dstate[:2])
+            self.goal_thresh = 3 * np.linalg.norm(self.dstate[:2])
         else:
             self.goal_thresh = goal_thresh
         self.heading_thresh = self.get_theta(state=dstate)
@@ -127,8 +139,8 @@ class LatticeDstarLite(object):
 
         # find nearest neighbors by position
         self.kdtree = kdtree.create(dimensions=2)
-        self.dist_thresh = 2 * (self.dstate[0]**2 + self.dstate[1]**2)
-        self.neighbor_count_thresh = 3
+        self.dist_thresh = (self.dstate[0]**2 + self.dstate[1]**2)
+        self.neighbor_count_thresh = 7
 
         # values that can change if new goal is set
         self.km = 0  # changing start position and thus changing heuristic
@@ -155,8 +167,6 @@ class LatticeDstarLite(object):
         # not a fully-defined state, but used as origin
         x0, y0, theta0 = 0, 0, 0
         state0 = np.array([x0, y0, theta0])
-        self.car = Car(max_steer=max(self.steer_angles),
-                       max_v=max(self.velocities))
 
         # N x 5 X M for N timesteps and M primitives
         self.base_trajs = np.zeros(
@@ -168,12 +178,16 @@ class LatticeDstarLite(object):
         self.graph.generate_trajectories_and_costs(
             mprim_actions=self.actions, base_trajs=self.base_trajs, state0=state0)
 
+    def euc_dist(self, s1, s2):
+        return np.linalg.norm(s1[:2] - s2[:2])
+
     def set_new_start(self, start):
         self.shifted_start = False  # reset
         self.start_key = self.state_to_key(start)
         assert (self.is_valid_key(self.start_key))
         if self.start is not None:
-            self.km += self.heuristic(cur=self.start, target=start)
+            # not using heuristic here since dubins path distance between two slightly shifted, nearby states can be huge
+            self.km += self.euc_dist(self.start, start)
         self.start = np.copy(start)
 
     def set_new_goal(self, goal):
@@ -269,8 +283,8 @@ class LatticeDstarLite(object):
 
             cur_node, cur_key = self.pop_from_open()
             cur_state = cur_node.state
-            # print("Expanded: %s, f=%.2f" %
-            #       (self.state_to_str(cur_state), cur_node.k1))
+            print("Expanded: %s, f=%.2f" %
+                  (self.state_to_str(cur_state), cur_node.k1))
 
             # track order of states expanded
             self.expand_order.append(cur_state)
@@ -317,7 +331,7 @@ class LatticeDstarLite(object):
                     plt.draw()
 
             if self.viz:
-                plt.pause(1)
+                plt.pause(0.5)
 
             # TODO: if reached start target state, update fstart value? Original dstar_lite doesn't do anything meaningful here
 
@@ -358,6 +372,7 @@ class LatticeDstarLite(object):
             # but only those that are relevant, so  only update start and let this propagate
             self.path_i = 0
             self.update_state(self.start)
+            self.obstacle_heuristic = astarlib.aStar(self.graph.obstacle_map)
 
         if need_update or self.path == []:
             # reverse start and goal so search backwards
@@ -365,7 +380,7 @@ class LatticeDstarLite(object):
             # print("Order of expansions:")
             # viz.draw_grid(self.graph, width=3, number=expansions, start=start,
             #               goal=self.goal)
-            self.path, self.policy = self.reconstruct_path(full=True)
+            self.path, self.policy = self.reconstruct_path()
             return self.path, self.policy
         else:
             self.path_i += 1
@@ -417,6 +432,8 @@ class LatticeDstarLite(object):
         return LatticeNode(k1, k2, cur)
 
     def get_k(self, cur, target):
+        if np.allclose(cur, [63.11, 40.15, 0.00, 20.00, 4.30]):
+            print("Hi")
         v = self.get_value(self.V, state=cur)
         g = self.get_value(self.G, state=cur)
         k2 = min(v, g)
@@ -462,6 +479,7 @@ class LatticeDstarLite(object):
         nn = self.kdtree.search_nn_dist(
             point=state[:2], distance=self.dist_thresh)
         # kdtree.visualize(self.kdtree)
+        return False
         return len(nn) >= self.neighbor_count_thresh
 
     def update_state(self, cur_state, action=None, t=None, predecessor_key=None, new_G=None):
@@ -496,13 +514,10 @@ class LatticeDstarLite(object):
         end_time = time.time()
         self.update_state_time += (end_time - start_time)
 
-    def reconstruct_path(self, full=False):
+    def reconstruct_path(self):
         """Generates full state path and policy (actions and their durations)
-        after solving for motion plan. By default, returns the exact state path found, which can skip over intermediary states.
-
-        Args:
-            full (bool, optional): This skipping behavior
-        can be avoided by specifying full=True, which will have every state along path returned and action durations all of value dt. To return full path, we use car controller to generate all the intermediary steps. Defaults to False.
+        after solving for motion plan. By default, returns the exact state path found, which can skip over intermediary states. This skipping behavior
+        can be avoided by specifying reconstruct_full=True at init, which will have every state along path returned and action durations all of value dt. To return full path, we use car controller to generate all the intermediary steps.
 
         Returns:
             tuple(state path, policy): 
@@ -518,7 +533,10 @@ class LatticeDstarLite(object):
             (next_key, action, t) = self.successor[cur_key]
             cur_state = self.key_to_state(cur_key)
             next_state = self.key_to_state(next_key)
-            if full:
+
+            # since plan was searched backwards, need to reverse steering
+            action.steer *= -1
+            if self.reconstruct_full:
                 rollout = self.car.rollout(
                     state=cur_state, action=action, dt=self.dt, T=t, t0=0)
                 N = int(t / self.dt)
@@ -534,6 +552,41 @@ class LatticeDstarLite(object):
             cur_key = next_key
         return path, policy
 
+    def graphics_to_cartesian_(self, state):
+        offset = np.zeros_like(state)
+        offset[self.get_y(index=True)] = self.graph.height
+        return offset - state
+
+    def nonholonomic_obstacle_free_(self, cur, target):
+        """Since euclidean distance is not a good heuristic for non-holonomic vehicles, we use dubin's path to estimate path length. While these 
+        values can be pre-computed in a heuristic lookup table (HLUT), 
+        there are many positions to precompute so the time saved by this
+        may not outweigh the high overhead of precomputing all state heuristics.
+        Also, dubin's path is a fast computation and this library is a Cython wrapper and thus still performs quickly.
+
+        Args:
+            cur ([type]): [description]
+            target ([type]): [description]
+
+        Returns:
+            [type]: [description]
+        """
+        cur_pose = cur[:3]  # x0, y0, theta0
+        target_pose = target[:3]  # x1, y1, theta1
+        # NOTE: we perform search from q0=target_pos to q1=cur_pos
+        # since we are doing backward search, this is actually what's
+        # going on, and this avoids issues of transforming frames
+        path = dubins.shortest_path(target_pose, cur_pose, self.min_turn_rad)
+        return path.path_length()
+
+    def holonomic_obstacle_(self, cur, target):
+        x0, y0, _, _, _ = self.state_to_key(cur)
+        x1, y1, _, _, _ = self.state_to_key(target)
+        dx = self.dstate[0]
+        path, dist = self.obstacle_heuristic.find_path(
+            start=(x0, y0), goal=(x1, y1))
+        return dist * dx
+
     def heuristic(self, cur, target):
         """Since backward search, heuristic  defined wrt start.
 
@@ -543,18 +596,19 @@ class LatticeDstarLite(object):
         # TODO: Euclidean distance grossly underestimates true
         # cost for dynamically-constrained vehicles, should find
         # a better heuristic
-        cur_pos = np.array(
-            [self.get_x(state=cur),         # x
-             self.get_y(state=cur),         # y
-             self.graph.get_map_val(cur)])  # z
+        # cur_pos = np.array(
+        #     [self.get_x(state=cur),         # x
+        #      self.get_y(state=cur),         # y
+        #      self.graph.get_map_val(cur)])  # z
 
-        start_pos = np.array(
-            [self.get_x(state=target),         # x
-             self.get_y(state=target),         # y
-             self.graph.get_map_val(target)])  # z
+        # start_pos = np.array(
+        #     [self.get_x(state=target),         # x
+        #      self.get_y(state=target),         # y
+        #      self.graph.get_map_val(target)])  # z
 
-        dist = np.linalg.norm(start_pos - cur_pos)
-        return dist
+        constraints_dist_cost = self.nonholonomic_obstacle_free_(cur, target)
+        obstacle_dist_cost = self.holonomic_obstacle_(cur, target)
+        return max(constraints_dist_cost, obstacle_dist_cost)
 
     def reached_target(self, state, target):
         """Basically like found-goal, but applied to backwards search. Still using goal threshold
@@ -564,10 +618,10 @@ class LatticeDstarLite(object):
         """
         # reaching goal requires similar position and heading
         # TODO: also include velocity for a dynamics-considering version?
-        # heading_dist = abs(
-        #     self.get_theta(state=state) - self.get_theta(state=target)) % TWO_PI
-        # is_similar_heading = heading_dist < self.heading_thresh
-
+        heading_dist = abs(
+            self.get_theta(state=state) - self.get_theta(state=target)) % TWO_PI
+        is_similar_heading = heading_dist < self.heading_thresh
+        print(self.heuristic(state, target), heading_dist * 180 / math.pi)
         is_spatially_near = self.heuristic(state, target) < self.goal_thresh
 
         return is_spatially_near  # and is_similar_heading

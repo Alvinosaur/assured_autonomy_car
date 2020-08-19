@@ -28,6 +28,7 @@ class Graph():
     def set_new_map(self, map):
         assert(isinstance(map, np.ndarray))
         self.map = map.astype(float)
+        self.obstacle_map = np.copy(self.map)
         self.height, self.width = map.shape  # y, x
 
     def generate_trajectories_and_costs(self, mprim_actions,
@@ -149,7 +150,11 @@ class Graph():
 
         # update map
         self.map[minyi:maxyi,
-                 minxi: maxxi] = obs_window
+                 minxi:maxxi] = obs_window
+
+        # TODO: obstacle map != map for 3D terrain
+        self.obstacle_map[minyi:maxyi,
+                          minxi:maxxi] = obs_window
         return need_update
 
     def calc_cost_and_validate_traj(self, orig, traj, action, ai):

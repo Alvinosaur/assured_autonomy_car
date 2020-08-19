@@ -2,6 +2,7 @@ import numpy as np
 import math
 import matplotlib.pyplot as plt
 
+from car_dynamics import Car
 from lattice_graph import Graph
 from lattice_dstar_lite import LatticeDstarLite
 
@@ -22,8 +23,8 @@ def get_obs_window_bounds(graph: Graph, state, width, height):
 
 def simulate_plan_execution(start, goal, planner: LatticeDstarLite, true_map, viz=True):
     dx, dy, _, _, _ = planner.dstate
-    obs_width = 5
-    obs_height = 5
+    obs_width = 7
+    obs_height = 7
 
     # two plots, one for true map, one for known map
     f = plt.figure()
@@ -48,6 +49,7 @@ def simulate_plan_execution(start, goal, planner: LatticeDstarLite, true_map, vi
             graph=planner.graph, state=start, width=obs_width, height=obs_height)
         obs_window = true_map[ybounds[0]:ybounds[1],
                               xbounds[0]: xbounds[1]]
+        print(obs_window)
 
         path, policy = planner.search(
             start=start, goal=goal, obs_window=obs_window, window_bounds=(xbounds, ybounds))
@@ -72,7 +74,7 @@ def simulate_plan_execution(start, goal, planner: LatticeDstarLite, true_map, vi
             # need to show true map too because we clear axes
             # to show updated path
             axs0.imshow(true_map)
-            plt.pause(1)
+            plt.pause(0.5)
 
         start = path[0]
 
@@ -114,9 +116,11 @@ def main():
     min_state = np.array([minx, miny, min(thetas), min(velocities), 0])
 
     # create planner and graph
-    graph = Graph(map=map, min_state=min_state, dstate=dstate,
+    prior_map = np.zeros_like(map)
+    graph = Graph(map=prior_map, min_state=min_state, dstate=dstate,
                   thetas=thetas, velocities=velocities, wheel_radius=wheel_radius, cost_weights=cost_weights)
-    planner = LatticeDstarLite(graph=graph, min_state=min_state, dstate=dstate,
+    car = Car(max_steer=max(steer_angles), max_v=max(velocities))
+    planner = LatticeDstarLite(graph=graph, car=car, min_state=min_state, dstate=dstate,
                                velocities=velocities, steer_angles=steer_angles, thetas=thetas, T=T, eps=eps, viz=True)
 
     # define start and  goal (x,y) need to be made continuous
@@ -125,7 +129,7 @@ def main():
              np.array([dx, dy, 1, 1, 1]))
     # looks like goal should face up, but theta is chosen
     # in image-frame as is the y-coordinates, so -90 faces
-    # upwards on our screen and +90 faces down
+    # upwards on our screen and +90 faces down... it looks
     goal = (np.array([85, 65, -math.pi / 2, velocities[0], 0]) *
             np.array([dx, dy, 1, 1, 1]))
 

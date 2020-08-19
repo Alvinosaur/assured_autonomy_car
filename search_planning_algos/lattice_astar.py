@@ -28,10 +28,10 @@ class Node(object):
 
 class LatticeAstar(LatticeDstarLite):
     # state = [x, y, theta]
-    def __init__(self, graph: Graph, min_state, dstate, velocities, steer_angles, thetas, T, goal_thresh=None, eps=1.0, viz=False):
-        super().__init__(graph=graph, min_state=min_state,
+    def __init__(self, graph: Graph, car: Car, min_state, dstate, velocities, steer_angles, thetas, T, goal_thresh=None, eps=1.0, viz=False, reconstruct_full=True):
+        super().__init__(graph=graph, car=car, min_state=min_state,
                          dstate=dstate, velocities=velocities,
-                         steer_angles=steer_angles, thetas=thetas, T=T, goal_thresh=goal_thresh, eps=eps, viz=viz)
+                         steer_angles=steer_angles, thetas=thetas, T=T, goal_thresh=goal_thresh, eps=eps, viz=viz, reconstruct_full=reconstruct_full)
         self.path_actions = []
         self.path_timesteps = []
 
@@ -152,7 +152,7 @@ class LatticeAstar(LatticeDstarLite):
         end_time = time.time()
         self.update_state_time += (end_time - start_time)
 
-    def reconstruct_path(self, full=False):
+    def reconstruct_path(self):
         """Indentical to LatticeDstarLite version except constructs backwards from goal to start since search was conducted forwards.
 
         Args:
@@ -169,7 +169,7 @@ class LatticeAstar(LatticeDstarLite):
             prev, action, t = self.successor[cur_key]
             # prev --> cur in temporally so that's the start of rollout
             prev_state = self.state_to_key(prev)
-            if full:
+            if self.reconstruct_full:
                 rollout = self.car.rollout(
                     state=prev_state, action=action, dt=self.dt, T=t, t0=0)
                 N = int(t / self.dt)

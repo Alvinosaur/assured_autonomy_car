@@ -55,7 +55,7 @@
             "name": "dstar lite",
             "type": "python",
             "request": "launch",
-            "program": "/Users/Alvin/Documents/Code/safety_reachability_AV_research/assured_autonomy_car/search_planning_algos/dstar_lite.py",
+            "program": "/Users/Alvin/Documents/Code/safety_reachability_AV_research/assured_autonomy_car/search_planning_algos/references/dstar_lite.py",
             "console": "integratedTerminal"
         },
         {
