@@ -102,7 +102,6 @@ class LatticeDstarLite(object):
     MAX_THETA = 2 * math.pi
 
     def __init__(self, graph: Graph, car: Car, min_state, dstate, velocities, steer_angles, thetas, T, goal_thresh=None, eps=1.0, viz=True, reconstruct_full=True):
-        self.update_state_time = 0
         self.min_state = min_state
         self.dstate = dstate
         self.velocities = velocities
@@ -170,6 +169,16 @@ class LatticeDstarLite(object):
         # benchmark debugging
         self.update_state_time = 0
         self.remove_from_open_time = 0
+        self.reconstruct_path_time = 0
+        self.get_min_g_val_time = 0
+        self.is_duplicate_time = 0
+        self.update_start_time = 0
+        self.nonholonomic_obstacle_free_time = 0
+        self.holonomic_obstacle_time = 0
+        self.reached_target_time = 0
+        self.update_stale_node_time = 0
+        self.t2_time = 0
+        self.t1_time = 0
 
     def precompute_all_primitives(self):
         # not a fully-defined state, but used as origin
@@ -310,9 +319,12 @@ class LatticeDstarLite(object):
             cur_state = cur_node.state
 
             # if this old inserted state has outdated heuristic value (start moved), then reinsert with new updated value
+            start_time = time.time()
             updated_node = self.create_node(cur_state)
             if cur_node < updated_node:
                 self.add_to_open(updated_node)
+                end_time = time.time()
+                self.update_stale_node_time += (end_time - start_time)
                 continue
 
             # track order of states expanded
@@ -421,6 +433,7 @@ class LatticeDstarLite(object):
         Returns:
             [type]: [description]
         """
+        start_time = time.time()
         min_g = self.INF
         best_neighbor_info = None
         all_trajs, trans_cost, actions = self.graph.neighbors(
@@ -438,6 +451,8 @@ class LatticeDstarLite(object):
                     best_neighbor_info = (
                         self.state_to_key(next_state), actions[ti], si * self.dt)
 
+        end_time = time.time()
+        self.get_min_g_val_time += (end_time - start_time)
         return min_g, best_neighbor_info
 
     def create_node(self, cur, set_h=None):
@@ -503,8 +518,11 @@ class LatticeDstarLite(object):
         return (np.array(key) * self.dstate) + self.min_state
 
     def is_duplicate(self, state):
+        start_time = time.time()
         nn = self.kdtree.search_nn_dist(
             point=state[:2], distance=self.dist_thresh)
+        end_time = time.time()
+        self.is_duplicate_time += (end_time - start_time)
         # kdtree.visualize(self.kdtree)
         return len(nn) >= self.neighbor_count_thresh
 
@@ -512,14 +530,13 @@ class LatticeDstarLite(object):
         start_time = time.time()
         # if already in openset, need to remove since has outdated f-val
         cur_key = self.state_to_key(cur_state)
-        if cur_key == (76, 41, 1, 0, 42):
-            print("FOUND!")
 
         # get updated v, g-value of current state
         cur_V = self.get_value(self.V, state_key=cur_key)
         cur_G = self.get_value(self.G, state_key=cur_key)
 
         # using direct comparison for increased performace
+        t1 = time.time()
         if cur_key != self.goal_key:
             if predecessor_key is not None:
                 if cur_V > new_G:
@@ -532,6 +549,7 @@ class LatticeDstarLite(object):
                 self.set_value(self.V, state_key=cur_key, val=min_g)
                 self.successor[cur_key] = best_neighbor_info
                 self.remove_from_open(cur_key)
+        self.t1_time += (time.time() - t1)
 
         # if reached within threshold of start, but not the exact start,
         # possibly make this the new start if it's better than the current
@@ -539,22 +557,26 @@ class LatticeDstarLite(object):
         set_new_start = False
         # print("%d Expanded: %s, orig start: %s, start: %s" %
         #       (self.reached_target(cur_state, self.orig_start), self.state_to_str(cur_state[:3]), self.state_to_str(self.orig_start[:3]), self.state_to_str(self.start[:3])))
+        update_start_time = time.time()
         if (self.reached_target(cur_state, self.orig_start) and
                 not self.state_equal(self.orig_start, cur_state, ignore_time=True)):
 
             best_shifted_dist = self.euc_dist(self.start, self.orig_start)
             new_shifted_dist = self.euc_dist(cur_state, self.orig_start)
-            print("%d Reached start: %s, is update: %d" %
-                  (self.reached_target(cur_state, self.orig_start), self.state_to_str(cur_state[:3]), not self.shifted_start or new_shifted_dist < best_shifted_dist))
+            # print("%d Reached start: %s, is update: %d" %
+            #       (self.reached_target(cur_state, self.orig_start), self.state_to_str(cur_state[:3]), not self.shifted_start or new_shifted_dist < best_shifted_dist))
             # update self.start but not self.orig_start
             if not self.shifted_start or new_shifted_dist < best_shifted_dist:
                 self.set_new_start(cur_state, update_orig=False)
                 set_new_start = True
+        self.update_start_time += (time.time() - update_start_time)
 
+        t2 = time.time()
         if not np.isclose(cur_V, cur_G, atol=1e-5) and (
                 not self.is_duplicate(cur_state)) and not set_new_start:
             self.add_to_open(self.create_node(cur_state))
             self.add_to_kdtree(cur_state)
+        self.t2_time += (time.time() - t2)
 
         end_time = time.time()
         self.update_state_time += (end_time - start_time)
@@ -567,6 +589,7 @@ class LatticeDstarLite(object):
         Returns:
             tuple(state path, policy): 
         """
+        start_time = time.time()
         cur_key = self.start_key
         path = []
         policy = []
@@ -595,6 +618,9 @@ class LatticeDstarLite(object):
                 policy.append((action, t))
 
             cur_key = next_key
+
+        end_time = time.time()
+        self.reconstruct_path_time += (end_time - start_time)
         return path, policy
 
     def graphics_to_cartesian_(self, state):
@@ -616,6 +642,7 @@ class LatticeDstarLite(object):
         Returns:
             [type]: [description]
         """
+        start_time = time.time()
         decimal_places = 3
         cur_pose = np.round(cur[:3], decimal_places)  # x0, y0, theta0
         target_pose = np.round(target[:3], decimal_places)  # x1, y1, theta1
@@ -628,20 +655,27 @@ class LatticeDstarLite(object):
         # going on, and this avoids issues of transforming frames
         path = dubins.shortest_path(target_pose, cur_pose, self.min_turn_rad)
         dist = self.euc_dist(cur, target)
+        end_time = time.time()
+        self.nonholonomic_obstacle_free_time += (end_time - start_time)
         if dist < self.goal_thresh:
             return dist
         else:
             return path.path_length()
 
     def holonomic_obstacle_(self, cur, target):
+        start_time = time.time()
         x0, y0, _, _, _ = self.state_to_key(cur)
         x1, y1, _, _, _ = self.state_to_key(target)
         dx = self.dstate[0]
         try:
             path, dist = self.obstacle_heuristic.find_path(
                 start=(x0, y0), goal=(x1, y1))
+            end_time = time.time()
+            self.holonomic_obstacle_time += (end_time - start_time)
             return dist * dx
         except astarlib.PathNotFoundException:
+            end_time = time.time()
+            self.holonomic_obstacle_time += (end_time - start_time)
             return self.INF
 
     def heuristic(self, cur, target):
@@ -673,12 +707,15 @@ class LatticeDstarLite(object):
         Args:
             state ([type]): [description]
         """
+        start_time = time.time()
         # reaching goal requires similar position and heading
         # TODO: also include velocity for a dynamics-considering version?
         heading_dist = abs(
             self.get_theta(state=state) - self.get_theta(state=target)) % TWO_PI
         is_similar_heading = heading_dist < self.heading_thresh
         is_spatially_near = self.heuristic(state, target) < self.goal_thresh
+        end_time = time.time()
+        self.reached_target_time += (end_time - start_time)
 
         return is_spatially_near and is_similar_heading
 
