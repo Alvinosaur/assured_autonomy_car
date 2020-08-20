@@ -4657,7 +4657,7 @@ static PyObject *__pyx_pf_8astarlib_5aStar_6find_path(CYTHON_UNUSED PyObject *__
  *                 nx, ny = next
  *                 if next in closed:             # <<<<<<<<<<<<<<
  *                     continue
- *                 elif self._buffer[ny][nx] is True:
+ *                 elif bool(self._buffer[ny][nx]) is True:
  */
       __pyx_t_9 = (__Pyx_PySet_ContainsTF(__pyx_v_next, __pyx_v_closed, Py_EQ)); if (unlikely(__pyx_t_9 < 0)) __PYX_ERR(0, 258, __pyx_L1_error)
       __pyx_t_12 = (__pyx_t_9 != 0);
@@ -4667,7 +4667,7 @@ static PyObject *__pyx_pf_8astarlib_5aStar_6find_path(CYTHON_UNUSED PyObject *__
  *                 nx, ny = next
  *                 if next in closed:
  *                     continue             # <<<<<<<<<<<<<<
- *                 elif self._buffer[ny][nx] is True:
+ *                 elif bool(self._buffer[ny][nx]) is True:
  *                     # ignore this neighbor (an obstacle).
  */
         goto __pyx_L10_continue;
@@ -4677,14 +4677,14 @@ static PyObject *__pyx_pf_8astarlib_5aStar_6find_path(CYTHON_UNUSED PyObject *__
  *                 nx, ny = next
  *                 if next in closed:             # <<<<<<<<<<<<<<
  *                     continue
- *                 elif self._buffer[ny][nx] is True:
+ *                 elif bool(self._buffer[ny][nx]) is True:
  */
       }
 
       /* "astarlib.pyx":260
  *                 if next in closed:
  *                     continue
- *                 elif self._buffer[ny][nx] is True:             # <<<<<<<<<<<<<<
+ *                 elif bool(self._buffer[ny][nx]) is True:             # <<<<<<<<<<<<<<
  *                     # ignore this neighbor (an obstacle).
  *                     closed.add(next)
  */
@@ -4696,13 +4696,17 @@ static PyObject *__pyx_pf_8astarlib_5aStar_6find_path(CYTHON_UNUSED PyObject *__
       __pyx_t_2 = __Pyx_PyObject_GetItem(__pyx_t_3, __pyx_v_nx); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 260, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_2);
       __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+      __pyx_t_12 = __Pyx_PyObject_IsTrue(__pyx_t_2); if (unlikely(__pyx_t_12 < 0)) __PYX_ERR(0, 260, __pyx_L1_error)
+      __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+      __pyx_t_2 = __Pyx_PyBool_FromLong((!(!__pyx_t_12))); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 260, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_2);
       __pyx_t_12 = (__pyx_t_2 == Py_True);
       __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
       __pyx_t_9 = (__pyx_t_12 != 0);
       if (__pyx_t_9) {
 
         /* "astarlib.pyx":262
- *                 elif self._buffer[ny][nx] is True:
+ *                 elif bool(self._buffer[ny][nx]) is True:
  *                     # ignore this neighbor (an obstacle).
  *                     closed.add(next)             # <<<<<<<<<<<<<<
  *                     continue
@@ -4722,7 +4726,7 @@ static PyObject *__pyx_pf_8astarlib_5aStar_6find_path(CYTHON_UNUSED PyObject *__
         /* "astarlib.pyx":260
  *                 if next in closed:
  *                     continue
- *                 elif self._buffer[ny][nx] is True:             # <<<<<<<<<<<<<<
+ *                 elif bool(self._buffer[ny][nx]) is True:             # <<<<<<<<<<<<<<
  *                     # ignore this neighbor (an obstacle).
  *                     closed.add(next)
  */

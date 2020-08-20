@@ -1,11 +1,13 @@
-from astarlib import aStar, euclidean_distance
+import astarlib
 import numpy as np
 
 map = np.load("map3.npy")
-area = aStar(map)
-start = (60, 40)
-goal = (85, 65)
-path, cost = area.find_path(start, goal, heuristic=euclidean_distance)
+area = astarlib.aStar(map)
+start = (77, 43)
+goal = (77, 50)
+came_from, cost = area.find_path(
+    start, goal, heuristic=astarlib.euclidean_distance)
+path = area.reconstruct_path(came_from, start, goal)
 
 print(path)
 print(cost)

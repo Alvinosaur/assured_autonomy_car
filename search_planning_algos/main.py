@@ -23,13 +23,16 @@ def get_obs_window_bounds(graph: Graph, state, width, height):
 
 def simulate_plan_execution(start, goal, planner: LatticeDstarLite, true_map, viz=True):
     dx, dy, _, _, _ = planner.dstate
-    obs_width = 7
-    obs_height = 7
+    obs_width = 31
+    obs_height = 31
 
     # two plots, one for true map, one for known map
     f = plt.figure()
+    height, width = true_map.shape
     axs0 = f.add_subplot(211)
     axs1 = f.add_subplot(212)
+    axs0.set_xticks(np.arange(0, width, step=5))
+    axs0.set_yticks(np.arange(0, height, step=5))
     axs0.imshow(true_map)
     axs1.imshow(planner.graph.map)
     f.suptitle(
@@ -49,7 +52,6 @@ def simulate_plan_execution(start, goal, planner: LatticeDstarLite, true_map, vi
             graph=planner.graph, state=start, width=obs_width, height=obs_height)
         obs_window = true_map[ybounds[0]:ybounds[1],
                               xbounds[0]: xbounds[1]]
-        print(obs_window)
 
         path, policy = planner.search(
             start=start, goal=goal, obs_window=obs_window, window_bounds=(xbounds, ybounds))

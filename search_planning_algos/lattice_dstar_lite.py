@@ -79,8 +79,10 @@ class LatticeNode():
         Node ([type]): [description]
     """
 
-    def __init__(self, k1, k2, state):
+    def __init__(self, k1, k2, state, g=None, h=None):
         assert (len(state) == 5)  # 4 states for [x,y,theta,vel,t]
+        self.g = g
+        self.h = h
         self.k1 = k1
         self.k2 = k2
         self.state = state
@@ -91,8 +93,8 @@ class LatticeNode():
             np.isclose(self.k1, other.k1, atol=1e-5) and self.k2 < other.k2)
 
     def __repr__(self):
-        return "%.2f,%.2f,%.2f,%.2f,%.2f, k1, k2: %.2f, %.2f" % (
-            self.state[0], self.state[1], self.state[2], self.state[3], self.state[4], self.k1, self.k2)
+        return "%.2f,%.2f,%.2f,%.2f,%.2f, k1, k2, g, h: %.2f, %.2f, %.2f, %.2f" % (
+            self.state[0], self.state[1], self.state[2], self.state[3], self.state[4], self.k1, self.k2, self.g, self.h)
 
 
 class LatticeDstarLite(object):
@@ -111,9 +113,11 @@ class LatticeDstarLite(object):
         self.reconstruct_full = reconstruct_full
         self.viz = viz
         if viz:
-            f = plt.figure()
+            f = plt.figure(figsize=(8, 8))
             self.ax = f.add_subplot(111)
             self.ax.imshow(graph.map)
+            self.ax.set_xticks(np.arange(0, graph.width, step=1))
+            self.ax.set_yticks(np.arange(0, graph.height, step=1))
             plt.ion()
             plt.show()
 
@@ -151,7 +155,11 @@ class LatticeDstarLite(object):
         self.policy = []
         self.open = []
         self.open_set = set()
-        self.start = self.goal = None
+        # self.orig_start is the original, unshifted start. It is kept
+        # untouched with each planning call so we can findn the shifted start
+        # closest to the original start and don't continuously keep shifting
+        # the start,  which may slowly drift away
+        self.start = self.orig_start = self.goal = None
         self.start_key = self.goal_key = None
         self.path_i = 0
 
@@ -181,14 +189,31 @@ class LatticeDstarLite(object):
     def euc_dist(self, s1, s2):
         return np.linalg.norm(s1[:2] - s2[:2])
 
-    def set_new_start(self, start):
-        self.shifted_start = False  # reset
+    def set_new_start(self, start, update_orig=False):
+        if update_orig:
+            self.shifted_start = False  # reset
+        else:
+            self.shifted_start = True
         self.start_key = self.state_to_key(start)
         assert (self.is_valid_key(self.start_key))
+
+        # calculate heuristic offset for shifted start
         if self.start is not None:
             # not using heuristic here since dubins path distance between two slightly shifted, nearby states can be huge
             self.km += self.euc_dist(self.start, start)
+
+        # udpate new start value
         self.start = np.copy(start)
+
+        # reinsert into OPEN with corrected heuristic(0 since new start should have 0 heuristic value) since
+        # actual heuristic to orig start will be possibly high due to dubins path
+        self.remove_from_open(self.start_key)
+        self.start_node = self.create_node(start, set_h=0)
+        self.add_to_open(self.start_node)
+
+        # only update actual original start at the beginning of search()
+        if update_orig:
+            self.orig_start = np.copy(start)
 
     def set_new_goal(self, goal):
         self.goal = np.copy(goal)
@@ -272,19 +297,23 @@ class LatticeDstarLite(object):
 
         if len(self.open_set) == 0:
             return
-        start_node = self.create_node(self.start)
+        self.start_node = self.create_node(self.start)
         min_node = self.peek_min_open()
 
         while len(self.open_set) > 0 and (
-                (min_node < start_node) or start_inconsistent):
+                (min_node < self.start_node) or start_inconsistent):
             # print("(Fstart, Fmin): (%s, %s)" % (start_node, min_node))
             # expand next node w/ lowest f-cost, add to closed
             # print(self.open)
 
             cur_node, cur_key = self.pop_from_open()
             cur_state = cur_node.state
-            print("Expanded: %s, f=%.2f" %
-                  (self.state_to_str(cur_state), cur_node.k1))
+
+            # if this old inserted state has outdated heuristic value (start moved), then reinsert with new updated value
+            updated_node = self.create_node(cur_state)
+            if cur_node < updated_node:
+                self.add_to_open(updated_node)
+                continue
 
             # track order of states expanded
             self.expand_order.append(cur_state)
@@ -300,16 +329,6 @@ class LatticeDstarLite(object):
                 self.set_value(self.G, state_key=cur_key, val=cur_G)
                 self.update_state(cur_state)  # Pred(s) U {s}
 
-            # if reached start target state, update fstart value
-            # implement goal threshold by applying threshold to start since backwards search. If any state is within threshold of start, just pick this state as new start.
-            if self.reached_target(cur_state, self.start):
-                # time of course won't be the same
-                if not self.state_equal(self.start, cur_state, ignore_time=True):
-                    self.set_new_start(cur_state)
-                    self.shifted_start = True
-                    start_node = self.create_node(self.start)
-                    # return entire path, not just path[1:]
-
             # get neighbor states update their values if necessary
             all_trajs, dist_costs, actions = self.graph.neighbors(
                 cur_state, predecessor=True)
@@ -320,8 +339,12 @@ class LatticeDstarLite(object):
                 for si in range(traj.shape[0]):
                     next_state = traj[si, :]
                     new_G = (dist_costs[ti][si] + cur_G)
-                    self.update_state(
-                        next_state, predecessor_key=cur_key, new_G=new_G, action=actions[ti], t=si * self.dt)
+                    if cur_G == self.INF:
+                        self.update_state(next_state, new_G=new_G,
+                                          action=actions[ti], t=si * self.dt)
+                    else:
+                        self.update_state(
+                            next_state, predecessor_key=cur_key, new_G=new_G, action=actions[ti], t=si * self.dt)
 
                 if self.viz:
                     dx, dy, _, _, _ = self.dstate
@@ -331,7 +354,7 @@ class LatticeDstarLite(object):
                     plt.draw()
 
             if self.viz:
-                plt.pause(0.5)
+                plt.pause(0.1)
 
             # TODO: if reached start target state, update fstart value? Original dstar_lite doesn't do anything meaningful here
 
@@ -348,16 +371,11 @@ class LatticeDstarLite(object):
         # for v in incons: heapq.heappush(self.open, v)
 
     def search(self, start, goal, obs_window, window_bounds):
-        self.set_new_start(start)
+        self.set_new_start(start, update_orig=True)
 
         # time irrelevant for goal so ignore
         if self.goal is None or not self.state_equal(self.goal, goal, ignore_time=True):
             self.set_new_goal(goal)
-
-        # in case goal isn't reachable from start, mark closest to start
-        # TODO: unused at the moment
-        self.closest_to_start = self.goal
-        self.best_dist = np.linalg.norm(self.goal[:2] - self.start[:2])
 
         # simulate act of observing new terrain near robot
         need_update = self.graph.update_map(
@@ -366,6 +384,8 @@ class LatticeDstarLite(object):
         if self.viz:
             self.ax.clear()
             self.ax.imshow(self.graph.map)
+            self.ax.set_xticks(np.arange(0, self.graph.width, step=5))
+            self.ax.set_yticks(np.arange(0, self.graph.height, step=5))
 
         if need_update and len(self.open) > 0:
             # point of dstar lite is to not update every state in open-set
@@ -385,13 +405,6 @@ class LatticeDstarLite(object):
         else:
             self.path_i += 1
             return self.path[self.path_i:], self.policy[self.path_i:]
-
-    def update_closest_to_start(self, cur_state):
-        # TODO: Currently unused
-        dist = np.linalg.norm(cur_state[:2] - self.start[:2])
-        if dist < self.best_dist:
-            self.best_dist = dist
-            self.closest_to_start = np.copy(cur_state)
 
     def get_min_g_val(self, cur):
         """Find best "successor"(predecessor in search process) from current state. Since we are doing backward search, all "successor" states are actually predecessors in the search process (ie: they were expanded before this current state in temporal order). In this case, when looking for neighbor states, these states' time values need to be subtracted in sequene rather than added.
@@ -419,30 +432,44 @@ class LatticeDstarLite(object):
                 assert(np.isclose(self.get_vel(
                     state=next_state), self.actions[ti].v))
                 cost = (trans_cost[ti][si] +
-                        self.get_value(self.G, state=next_state))
+                        self.get_value(self.V, state=next_state))
                 if cost < min_g or best_neighbor_info is None:
                     min_g = cost
                     best_neighbor_info = (
-                        next_state, actions[ti], si * self.dt)
+                        self.state_to_key(next_state), actions[ti], si * self.dt)
 
         return min_g, best_neighbor_info
 
-    def create_node(self, cur):
-        k1, k2 = self.get_k(cur, target=self.start)
-        return LatticeNode(k1, k2, cur)
+    def create_node(self, cur, set_h=None):
+        k1, k2 = self.get_k(cur, target=self.start, set_h=set_h)
+        if set_h is not None:
+            h = set_h
+        else:
+            h = self.heuristic(cur, self.start) + self.km
+        return LatticeNode(k1, k2, cur, g=k2, h=h)
 
-    def get_k(self, cur, target):
-        if np.allclose(cur, [63.11, 40.15, 0.00, 20.00, 4.30]):
-            print("Hi")
+    def get_k(self, cur, target, set_h=None):
+        """CURRENT CHALLENGE: after we detect change in environment and we're in an intermediary state and thus our state wasn't necessarily expanded before, what states to expand? How to deal with this?
+
+        Args:
+            cur ([type]): [description]
+            target ([type]): [description]
+
+        Returns:
+            [type]: [description]
+        """
         v = self.get_value(self.V, state=cur)
         g = self.get_value(self.G, state=cur)
         k2 = min(v, g)
         # k1 = f-value
-        h = self.heuristic(cur, target)
+        if set_h is not None:
+            h = set_h
+        else:
+            h = self.heuristic(cur, target) + self.km
         # km here accounts for issue where the moving start is our "goal" with
         # backward search, so the heuristics always change, but can just add
         # constant
-        k1 = self.compute_f(g=k2, h=h + self.km, eps=self.eps, )
+        k1 = self.compute_f(g=k2, h=h, eps=self.eps)
         # print("%s: g(%.2f) + eps*h(%.2f) = (%.2f):" % (
         #     self.state_to_str(cur), k2, k1 - k2, k1))
         return (k1, k2)
@@ -479,14 +506,14 @@ class LatticeDstarLite(object):
         nn = self.kdtree.search_nn_dist(
             point=state[:2], distance=self.dist_thresh)
         # kdtree.visualize(self.kdtree)
-        return False
         return len(nn) >= self.neighbor_count_thresh
 
     def update_state(self, cur_state, action=None, t=None, predecessor_key=None, new_G=None):
         start_time = time.time()
         # if already in openset, need to remove since has outdated f-val
         cur_key = self.state_to_key(cur_state)
-        self.remove_from_open(cur_key)
+        if cur_key == (76, 41, 1, 0, 42):
+            print("FOUND!")
 
         # get updated v, g-value of current state
         cur_V = self.get_value(self.V, state_key=cur_key)
@@ -499,15 +526,33 @@ class LatticeDstarLite(object):
                     cur_V = new_G
                     self.set_value(self.V, state_key=cur_key, val=cur_V)
                     self.successor[cur_key] = (predecessor_key, action, t)
+                    self.remove_from_open(cur_key)
             else:
                 min_g, best_neighbor_info = self.get_min_g_val(cur_state)
                 self.set_value(self.V, state_key=cur_key, val=min_g)
                 self.successor[cur_key] = best_neighbor_info
+                self.remove_from_open(cur_key)
 
-        # if inconsistent, insert into open set
+        # if reached within threshold of start, but not the exact start,
+        # possibly make this the new start if it's better than the current
+        # shifted start
+        set_new_start = False
+        # print("%d Expanded: %s, orig start: %s, start: %s" %
+        #       (self.reached_target(cur_state, self.orig_start), self.state_to_str(cur_state[:3]), self.state_to_str(self.orig_start[:3]), self.state_to_str(self.start[:3])))
+        if (self.reached_target(cur_state, self.orig_start) and
+                not self.state_equal(self.orig_start, cur_state, ignore_time=True)):
+
+            best_shifted_dist = self.euc_dist(self.start, self.orig_start)
+            new_shifted_dist = self.euc_dist(cur_state, self.orig_start)
+            print("%d Reached start: %s, is update: %d" %
+                  (self.reached_target(cur_state, self.orig_start), self.state_to_str(cur_state[:3]), not self.shifted_start or new_shifted_dist < best_shifted_dist))
+            # update self.start but not self.orig_start
+            if not self.shifted_start or new_shifted_dist < best_shifted_dist:
+                self.set_new_start(cur_state, update_orig=False)
+                set_new_start = True
 
         if not np.isclose(cur_V, cur_G, atol=1e-5) and (
-                not self.is_duplicate(cur_state)):
+                not self.is_duplicate(cur_state)) and not set_new_start:
             self.add_to_open(self.create_node(cur_state))
             self.add_to_kdtree(cur_state)
 
@@ -530,7 +575,7 @@ class LatticeDstarLite(object):
             path.append(self.start)
 
         while cur_key != self.goal_key:
-            (next_key, action, t) = self.successor[cur_key]
+            (next_key, action, t) = copy.deepcopy(self.successor[cur_key])
             cur_state = self.key_to_state(cur_key)
             next_state = self.key_to_state(next_key)
 
@@ -540,7 +585,7 @@ class LatticeDstarLite(object):
                 rollout = self.car.rollout(
                     state=cur_state, action=action, dt=self.dt, T=t, t0=0)
                 N = int(t / self.dt)
-                print("Rollout  generating for N= %d" % N)
+                # print("Rollout  generating for N= %d" % N)
                 for i in range(N):
                     path.append(rollout[i, :])
                     policy.append((action, self.dt))
@@ -562,7 +607,7 @@ class LatticeDstarLite(object):
         values can be pre-computed in a heuristic lookup table (HLUT), 
         there are many positions to precompute so the time saved by this
         may not outweigh the high overhead of precomputing all state heuristics.
-        Also, dubin's path is a fast computation and this library is a Cython wrapper and thus still performs quickly.
+        Also, dubin's path is a fast computation and this library is a Cython wrapper and thus still performs quickly. Since dubin's path will estimate a large path length to perfectly reach a target, but we only  care about approximately reaching, we return euclidean distance instead of the target is within some radius r.
 
         Args:
             cur ([type]): [description]
@@ -571,21 +616,33 @@ class LatticeDstarLite(object):
         Returns:
             [type]: [description]
         """
-        cur_pose = cur[:3]  # x0, y0, theta0
-        target_pose = target[:3]  # x1, y1, theta1
+        decimal_places = 3
+        cur_pose = np.round(cur[:3], decimal_places)  # x0, y0, theta0
+        target_pose = np.round(target[:3], decimal_places)  # x1, y1, theta1
+
+        # due to floating precision errors, make angles discrete
+        cur_pose[2] = round(cur_pose[2], 2)
+
         # NOTE: we perform search from q0=target_pos to q1=cur_pos
         # since we are doing backward search, this is actually what's
         # going on, and this avoids issues of transforming frames
         path = dubins.shortest_path(target_pose, cur_pose, self.min_turn_rad)
-        return path.path_length()
+        dist = self.euc_dist(cur, target)
+        if dist < self.goal_thresh:
+            return dist
+        else:
+            return path.path_length()
 
     def holonomic_obstacle_(self, cur, target):
         x0, y0, _, _, _ = self.state_to_key(cur)
         x1, y1, _, _, _ = self.state_to_key(target)
         dx = self.dstate[0]
-        path, dist = self.obstacle_heuristic.find_path(
-            start=(x0, y0), goal=(x1, y1))
-        return dist * dx
+        try:
+            path, dist = self.obstacle_heuristic.find_path(
+                start=(x0, y0), goal=(x1, y1))
+            return dist * dx
+        except astarlib.PathNotFoundException:
+            return self.INF
 
     def heuristic(self, cur, target):
         """Since backward search, heuristic  defined wrt start.
@@ -621,10 +678,9 @@ class LatticeDstarLite(object):
         heading_dist = abs(
             self.get_theta(state=state) - self.get_theta(state=target)) % TWO_PI
         is_similar_heading = heading_dist < self.heading_thresh
-        print(self.heuristic(state, target), heading_dist * 180 / math.pi)
         is_spatially_near = self.heuristic(state, target) < self.goal_thresh
 
-        return is_spatially_near  # and is_similar_heading
+        return is_spatially_near and is_similar_heading
 
     def state_equal(self, n1, n2, ignore_time=False):
         # let state_to_key handle issues of angle wraparound
@@ -690,5 +746,6 @@ class LatticeDstarLite(object):
 
     @ staticmethod
     def state_to_str(state):
-        return "(%.2f,%.2f,%.2f,%.2f, %.2f)" % (
-            state[0], state[1], state[2], state[3], state[4])
+        syms = "%.2f," * state.shape[0]
+        vals = tuple(state)
+        return syms % vals

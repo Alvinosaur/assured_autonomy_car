@@ -257,7 +257,7 @@ class aStar(object):
                 nx, ny = next
                 if next in closed:
                     continue
-                elif self._buffer[ny][nx] is True:
+                elif bool(self._buffer[ny][nx]) is True:
                     # ignore this neighbor (an obstacle).
                     closed.add(next)
                     continue
