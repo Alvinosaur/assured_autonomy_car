@@ -124,7 +124,7 @@ class DstarLite(object):
     def compute_path_with_reuse(self, eps=1.0):
         # closed = set()
         # incons = []  # states with inconsistent values, but already expanded
-        expansions = {}  # visualize order in which states are expanded
+        expansions = []  # visualize order in which states are expanded
         # update whether start is inconsistent
         gstart = self.get_value(self.G, self.start)
         vstart = self.get_value(self.V, self.start)
@@ -135,15 +135,12 @@ class DstarLite(object):
         start_node = self.create_node(self.start)
         min_node = self.open_set[0]
 
-        i = 0
         while len(self.open_set) > 0 and (
                 (min_node < start_node) or start_inconsistent):
             # print("(Fstart, Fmin): (%s, %s)" % (start_node, min_node))
             # expand next node w/ lowest f-cost, add to closed
-            print(self.open_set)
             cur_node = heapq.heappop(self.open_set)
-            print("   Expanded %d : %s: %s" % (i, str(cur_node),
-                                               str(list(self.graph.neighbors(cur_node.state)))))
+            print("Expanded %s" % (str(cur_node)))
             # print("Current: %s" % cur_node)
             cur_state = cur_node.state
             # closed.add(current)
@@ -155,8 +152,7 @@ class DstarLite(object):
                 continue
 
             # visualize expansion process
-            expansions[cur_state] = i
-            i += 1
+            expansions.append(cur_state)
 
             g_cur = self.get_value(self.G, cur_state)
             v_cur = self.get_value(self.V, cur_state)
@@ -416,6 +412,12 @@ if __name__ == "__main__":
     print("Time taken: %.2fs" % (end_time - start_time))
 
 """
+# Useful functions during debugging:
+# Visualize G-values:
 viz.draw_grid(self.graph, width=3,
-              number=self.G, start=start, goal=goal, use_np_arr=True)
+              number=self.G, start=self.start, goal=self.goal, use_np_arr=True)
+
+# Visualize What states are expanded:
+viz.draw_grid(self.graph, width=3,
+              expanded=expansions)
 """
