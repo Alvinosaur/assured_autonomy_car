@@ -76,7 +76,7 @@ def simulate_plan_execution(start, goal, planner: LatticeDstarLite, true_map, vi
             # need to show true map too because we clear axes
             # to show updated path
             axs0.imshow(true_map)
-            plt.pause(0.5)
+            plt.pause(0.01)
 
         start = path[0]
 
@@ -120,7 +120,7 @@ def main():
     # create planner and graph
     prior_map = np.zeros_like(map)
     graph = Graph(map=prior_map, min_state=min_state, dstate=dstate,
-                  thetas=thetas, velocities=velocities, wheel_radius=wheel_radius, cost_weights=cost_weights)
+                  thetas=thetas, wheel_radius=wheel_radius, cost_weights=cost_weights)
     car = Car(max_steer=max(steer_angles), max_v=max(velocities))
     planner = LatticeDstarLite(graph=graph, car=car, min_state=min_state, dstate=dstate,
                                velocities=velocities, steer_angles=steer_angles, thetas=thetas, T=T, eps=eps, viz=True)

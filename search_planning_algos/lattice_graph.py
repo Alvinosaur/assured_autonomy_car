@@ -1,9 +1,10 @@
 import numpy as np
 import math
+import copy
 
 
 class Graph():
-    def __init__(self, map, min_state, dstate, thetas, velocities, wheel_radius, cost_weights):
+    def __init__(self, map, min_state, dstate, thetas, wheel_radius, cost_weights):
         """Note: state at timestep 0 is NOT  original state, but next state, so original state is not part of rollout.
 
         Args:
@@ -19,11 +20,18 @@ class Graph():
         self.dstate = dstate
         self.min_state = min_state
         self.thetas = thetas
-        self.velocities = velocities
         self.wheel_radius = wheel_radius
-
         # very planner-specific
         self.dist_weight, self.time_weight, self.roughness_weight = cost_weights
+
+        # map a discrete theta bin to a set of rollouts generated from that direction
+        self.theta_to_trajs = None
+
+        # number of samples in one rollout
+        self.N = None
+
+        # number of motion primitives (size of one set of rollouts)
+        self.M = None
 
     def set_new_map(self, map):
         assert(isinstance(map, np.ndarray))
@@ -31,52 +39,13 @@ class Graph():
         self.obstacle_map = np.copy(self.map)
         self.height, self.width = map.shape  # y, x
 
-    def generate_trajectories_and_costs(self, mprim_actions,
-                                        base_trajs, state0):
-        # N x 3 X M for N timesteps and M primitives
-        # organized as [x,y,theta]
-        assert (len(base_trajs.shape) == 3)  # 3 dimensional
-        self.N, state_dim, self.num_prims = base_trajs.shape
-        assert(len(mprim_actions) == self.num_prims)
-        assert (state_dim == 5)  # x, y, theta, v, t
+    def set_theta_to_trajs(self, theta_to_trajs):
+        # each theta should have its own set of base rollouts
+        assert (len(theta_to_trajs) == len(self.thetas))
+        self.N, S, self.M = theta_to_trajs[0].shape
+        assert(S == len(self.dstate))  # S is size of state space
 
-        # basic primitives that will be rotated and translated
-        # based on current state
-        self.base_trajs = base_trajs
-
-        # actions associated the above trajectories
-        self.mprim_actions = mprim_actions
-
-        # precompute rotated base trajectories for every discrete heading bin
-        self.theta_to_trajs = [None] * len(self.thetas)
-
-        # TODO: more accurate way is to compute for every x,y in trajectory
-        # the overlapping cells of car(need width,length of car)
-        # but for now just use the x,y states only
-
-        # for every theta bin, apply rotation to base trajectories
-        for ti, theta_offset in enumerate(self.thetas):
-            new_trajs = np.copy(self.base_trajs)
-
-            # offset theta simply added with base thetas
-            new_trajs[:, self.get_theta(index=True), :] += theta_offset
-
-            # create SE2 rotation using theta offset
-            rot_mat = np.array([
-                [math.cos(theta_offset), -math.sin(theta_offset)],
-                [math.sin(theta_offset), math.cos(theta_offset)]])
-
-            # apply rotation to every primitive's trajectory
-            for ai in range(self.num_prims):  # action-index = ai
-                # since trajectories stored as [x,y], flip to [y,x] to properly be rotated by SE2 matrix
-                yx_coords = np.fliplr(new_trajs[:, 0:2, ai])
-
-                # flip back to [x,y] after applying rotation
-                new_trajs[:, 0:2, ai] = np.fliplr(yx_coords @ rot_mat)
-
-            self.theta_to_trajs[ti] = new_trajs
-            # self.all_disc_traj.append(
-            #     self.discretize(new_trajs, is_traj=True))
+        self.theta_to_trajs = copy.deepcopy(theta_to_trajs)
 
     def neighbors(self, state, predecessor=False, backwards=False):
         """Lookup associated base trajectory for this  theta heading. Make a copy  and apply translation of current state position. Should return a trajectory of valid positions. For neighbor trajectories, uses base precomputed trajectories offset with offset of current position and time.
@@ -111,13 +80,13 @@ class Graph():
         valid_trajs = []
 
         translation = np.array([x, y, 0, 0, t])
-        for ai, action in enumerate(self.mprim_actions):
+        for ai in range(self.M):
             # apply translation in position and time
             new_traj = base_trajs[:, :, ai] + translation
 
             # NOTE: destructively modify trajs
             per_sample_cost, new_traj = self.calc_cost_and_validate_traj(
-                state, new_traj, action, ai)
+                state, new_traj)
 
             # if generating predecessors, need to flip back their thetas to original orientation that state was facing
             if predecessor:
@@ -125,7 +94,7 @@ class Graph():
 
             costs.append(per_sample_cost)
             valid_trajs.append(new_traj)
-        return valid_trajs, costs, self.mprim_actions
+        return valid_trajs, costs
         # need to find which discrete states the trajectory covers
         # could be pre-computed when given the continuous-space trajectory?
 
@@ -157,7 +126,7 @@ class Graph():
                           minxi:maxxi] = obs_window
         return need_update
 
-    def calc_cost_and_validate_traj(self, orig, traj, action, ai):
+    def calc_cost_and_validate_traj(self, orig, traj):
         """Destructively modify traj to only include valid  states. Usually costs should be determined by planner, not the map module, but easier to leave all costing here since cost is heavily dependent on map terrain and distance traveled, so avoid copying over map to planner.
 
         Args:
@@ -227,7 +196,6 @@ class Graph():
         return (0 <= xi < self.width and
                 0 <= yi < self.height and
                 0 <= thetai < len(self.thetas) and
-                0 <= vi < len(self.velocities) and
                 0 <= ti)
 
     def is_collision(self, prev, next, num_steps=5):

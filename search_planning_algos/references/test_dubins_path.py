@@ -81,7 +81,7 @@ def plot_dubins_table(cols, rho=1.0):
 
 # plot_dubins_table(3, 1.0)
 start = [85, 40, -math.pi / 2]
-goal = [85, 65, -math.pi / 2]
+goal = [85.5, 40, -math.pi / 2]
 L = 1.0
 max_steer = math.pi / 32
 min_turn_rad = L / math.tan(max_steer)

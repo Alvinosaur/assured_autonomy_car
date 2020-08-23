@@ -22,7 +22,7 @@ def draw_tile(graph, id, style, width, use_np_arr):
             if np.isclose(num, sys.float_info.max, atol=1):
                 r = "Inf"
             else:
-                r = "%d" % num
+                r = "%.1f" % num
 
         elif id in style['number']:
             r = "%d" % style['number'][id]
@@ -37,6 +37,8 @@ def draw_tile(graph, id, style, width, use_np_arr):
             r = "^"
         if y2 == y1 - 1:
             r = "V"
+    if 'expanded' in style and id in style['expanded']:
+        r = "X"
     if 'start' in style and id == style['start']:
         r = "S"
     if 'goal' in style and id == style['goal']:
@@ -44,7 +46,8 @@ def draw_tile(graph, id, style, width, use_np_arr):
     if 'path' in style and id in style['path']:
         r = "@"
     if id in graph.walls:
-        r = "#" * width
+        r = "#" + " " * max((width - 1), 0)
+        # r = "### "
     return r
 
 
@@ -96,8 +99,6 @@ class GridWithWeights(SquareGrid):
         self.weights = {}
 
     def cost(self, from_node, to_node):
-        if (to_node == (6, 8)):
-            print("SHIT")
         return self.weights.get(to_node, 0)
 
 

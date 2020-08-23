@@ -185,15 +185,39 @@ class LatticeDstarLite(object):
         x0, y0, theta0 = 0, 0, 0
         state0 = np.array([x0, y0, theta0])
 
-        # N x 5 X M for N timesteps and M primitives
-        self.base_trajs = np.zeros(
+        # Generate base rollouts reused for various rotations and translations
+        # (N x 5 X M) for N timesteps and M primitives
+        base_trajs = np.zeros(
             shape=(self.N, len(self.dstate), len(self.actions)))
         for ai, action in enumerate(self.actions):
-            self.base_trajs[:, :, ai] = self.car.rollout(
+            base_trajs[:, :, ai] = self.car.rollout(
                 state=state0, action=action, dt=self.dt, T=self.T, t0=0)
 
-        self.graph.generate_trajectories_and_costs(
-            mprim_actions=self.actions, base_trajs=self.base_trajs, state0=state0)
+        # for every theta bin, apply rotation to base trajectory and store
+        theta_to_trajs = [None] * len(self.thetas)
+        for ti, theta_offset in enumerate(self.thetas):
+            new_trajs = np.copy(base_trajs)
+
+            # offset theta simply added with base thetas
+            new_trajs[:, self.get_theta(index=True), :] += theta_offset
+
+            # create SE2 rotation using theta offset
+            rot_mat = np.array([
+                [math.cos(theta_offset), -math.sin(theta_offset)],
+                [math.sin(theta_offset), math.cos(theta_offset)]])
+
+            # apply rotation to every primitive's trajectory
+            for ai in range(len(self.actions)):  # action-index = ai
+                # since trajectories stored as [x,y], flip to [y,x] to properly be rotated by SE2 matrix
+                yx_coords = np.fliplr(new_trajs[:, 0:2, ai])
+
+                # flip back to [x,y] after applying rotation
+                new_trajs[:, 0:2, ai] = np.fliplr(yx_coords @ rot_mat)
+
+            theta_to_trajs[ti] = new_trajs
+
+        # store in graph so it can generate neighbors
+        self.graph.set_theta_to_trajs(theta_to_trajs)
 
     def euc_dist(self, s1, s2):
         return np.linalg.norm(s1[:2] - s2[:2])
@@ -342,21 +366,21 @@ class LatticeDstarLite(object):
                 self.update_state(cur_state)  # Pred(s) U {s}
 
             # get neighbor states update their values if necessary
-            all_trajs, dist_costs, actions = self.graph.neighbors(
+            all_trajs, dist_costs = self.graph.neighbors(
                 cur_state, predecessor=True)
             for ti, traj in enumerate(all_trajs):
                 # iterate through trajectory and add states to open set
                 # print()
-                # print("Action: %s" % str(actions[ti]))
+                # print("Action: %s" % str(self.actions[ti]))
                 for si in range(traj.shape[0]):
                     next_state = traj[si, :]
                     new_G = (dist_costs[ti][si] + cur_G)
-                    if cur_G == self.INF:
+                    if cur_G >= self.INF:
                         self.update_state(next_state, new_G=new_G,
-                                          action=actions[ti], t=si * self.dt)
+                                          action=self.actions[ti], t=si * self.dt)
                     else:
                         self.update_state(
-                            next_state, predecessor_key=cur_key, new_G=new_G, action=actions[ti], t=si * self.dt)
+                            next_state, predecessor_key=cur_key, new_G=new_G, action=self.actions[ti], t=si * self.dt)
 
                 if self.viz:
                     dx, dy, _, _, _ = self.dstate
@@ -366,7 +390,7 @@ class LatticeDstarLite(object):
                     plt.draw()
 
             if self.viz:
-                plt.pause(0.1)
+                plt.pause(0.01)
 
             # TODO: if reached start target state, update fstart value? Original dstar_lite doesn't do anything meaningful here
 
@@ -436,7 +460,7 @@ class LatticeDstarLite(object):
         start_time = time.time()
         min_g = self.INF
         best_neighbor_info = None
-        all_trajs, trans_cost, actions = self.graph.neighbors(
+        all_trajs, trans_cost = self.graph.neighbors(
             cur, backwards=True)
         for ti, traj in enumerate(all_trajs):
             # iterate through trajectory and add states to open set
@@ -444,12 +468,14 @@ class LatticeDstarLite(object):
                 next_state = traj[si, :]
                 assert(np.isclose(self.get_vel(
                     state=next_state), self.actions[ti].v))
+
+                # NOTE: we use V value here instead of G
                 cost = (trans_cost[ti][si] +
                         self.get_value(self.V, state=next_state))
                 if cost < min_g or best_neighbor_info is None:
                     min_g = cost
                     best_neighbor_info = (
-                        self.state_to_key(next_state), actions[ti], si * self.dt)
+                        self.state_to_key(next_state), self.actions[ti], si * self.dt)
 
         end_time = time.time()
         self.get_min_g_val_time += (end_time - start_time)
@@ -542,8 +568,14 @@ class LatticeDstarLite(object):
                 if cur_V > new_G:
                     cur_V = new_G
                     self.set_value(self.V, state_key=cur_key, val=cur_V)
+                    if (tuple(cur_key[0:2]) == (114, 42) and
+                            tuple(predecessor_key[0:2]) == (111, 51)):
+                        print("SHIT")
                     self.successor[cur_key] = (predecessor_key, action, t)
                     self.remove_from_open(cur_key)
+
+            # our previous predecessor has increased cost, so our current optimal path is invalid
+            # (new_G > cur_V and self.successor[cur_key] == predecessor_key):
             else:
                 min_g, best_neighbor_info = self.get_min_g_val(cur_state)
                 self.set_value(self.V, state_key=cur_key, val=min_g)
