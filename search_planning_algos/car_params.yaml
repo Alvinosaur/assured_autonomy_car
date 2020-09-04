@@ -1,0 +1,15 @@
+max_steer: 0.098  # math.pi / 32
+max_speed: 2  # m/s
+wheel_radius: 0.2794 #  22/2 * 2.54/100(in_to_meters)
+car_length: 1.770  # m
+
+# non-car related
+# NOTE: actually +1 in MATLAB, but zero-index in python so subtract 1
+# q(state) indices
+xi: 3  # example: actually 4 in MATLAB
+yi: 4
+yaw_i: 2
+
+# qvel indices
+vel_i: 3    
+steer_i: 2 

@@ -249,6 +249,9 @@ class LatticeDstarLite(object):
             self.orig_start = np.copy(start)
 
     def set_new_goal(self, goal):
+        if self.state_equal(self.goal, goal, ignore_time=True):
+            return
+
         self.goal = np.copy(goal)
         self.goal_key = self.state_to_key(goal)
         assert(self.is_valid_key(self.goal_key))
@@ -716,18 +719,6 @@ class LatticeDstarLite(object):
         Args:
             state ([type]): [description]
         """
-        # TODO: Euclidean distance grossly underestimates true
-        # cost for dynamically-constrained vehicles, should find
-        # a better heuristic
-        # cur_pos = np.array(
-        #     [self.get_x(state=cur),         # x
-        #      self.get_y(state=cur),         # y
-        #      self.graph.get_map_val(cur)])  # z
-
-        # start_pos = np.array(
-        #     [self.get_x(state=target),         # x
-        #      self.get_y(state=target),         # y
-        #      self.graph.get_map_val(target)])  # z
 
         constraints_dist_cost = self.nonholonomic_obstacle_free_(cur, target)
         obstacle_dist_cost = self.holonomic_obstacle_(cur, target)
@@ -752,6 +743,9 @@ class LatticeDstarLite(object):
         return is_spatially_near and is_similar_heading
 
     def state_equal(self, n1, n2, ignore_time=False):
+        # None if has not been set yet
+        if n1 is None or n2 is None:
+            return False
         # let state_to_key handle issues of angle wraparound
         n1_key = self.state_to_key(n1)
         n2_key = self.state_to_key(n2)

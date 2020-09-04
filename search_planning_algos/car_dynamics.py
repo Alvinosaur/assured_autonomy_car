@@ -24,13 +24,15 @@ class Car():
         object ([type]): [description]
     """
 
-    def __init__(self, L=1.0, max_v=3, max_steer=math.pi / 4):
+    def __init__(self, L=1.0, max_v=3, max_steer=math.pi / 4, wheel_radius=1.0):
         # state = [x, y, theta, v, t]
         self.M = 5  # size of state space
 
-        self.L = 1.0  # length of car
+        self.L = L  # length of car
         self.max_v = max_v
         self.max_steer = max_steer
+
+        self.wheel_radius = wheel_radius
 
     def rollout(self, state, action: Action, dt, T, t0=0):
         """Note: state at timestep 0 is NOT  original state, but next state, so original state is not part of rollout. This means
