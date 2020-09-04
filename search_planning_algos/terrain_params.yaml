@@ -1,0 +1,4 @@
+cellsize: 0.1
+map_width_cont: 50
+map_length_cont:  50
+update_height_increment: 0.1
